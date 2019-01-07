@@ -13,7 +13,13 @@ namespace ChunkIO
 
         public ByteWriter(string fname)
         {
-            _file = new FileStream(fname, FileMode.Append, FileAccess.Write, FileShare.Read, 4 << 10, useAsync: true);
+            _file = new FileStream(
+                fname,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.Read | FileShare.Delete,
+                bufferSize: 4 << 10,
+                useAsync: true);
         }
 
         public string Name => _file.Name;
