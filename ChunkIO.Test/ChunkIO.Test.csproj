@@ -4,11 +4,11 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{E2D6632D-F95F-4C15-B27B-496450926590}</ProjectGuid>
+    <ProjectGuid>{0E76E245-95FA-47CC-A759-55DD61A55F4E}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>ChunkIO</RootNamespace>
-    <AssemblyName>ChunkIO</AssemblyName>
+    <RootNamespace>ChunkIO.Test</RootNamespace>
+    <AssemblyName>ChunkIO.Test</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
@@ -31,6 +31,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework, Version=10.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -41,15 +42,14 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="BufferedReader.cs" />
-    <Compile Include="Chunk.cs" />
-    <Compile Include="ChunkReader.cs" />
-    <Compile Include="ChunkWriter.cs" />
-    <Compile Include="ByteReader.cs" />
-    <Compile Include="ByteWriter.cs" />
+    <Compile Include="ByteWriter.Test.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="BufferedWriter.cs" />
-    <Compile Include="RemoteFlush.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ChunkIO\ChunkIO.csproj">
+      <Project>{e2d6632d-f95f-4c15-b27b-496450926590}</Project>
+      <Name>ChunkIO</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
