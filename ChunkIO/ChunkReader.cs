@@ -11,7 +11,7 @@ namespace ChunkIO
         ulong BeginPosition { get; }
         ulong EndPosition { get; }
         ulong ContentLength { get; }
-        ChunkUserData UserData { get; }
+        UserData UserData { get; }
 
         Task<bool> ReadContent(byte[] array, int offset);
     }

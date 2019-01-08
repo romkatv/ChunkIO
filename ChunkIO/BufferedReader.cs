@@ -1,11 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO
 {
+    abstract class InputBuffer : Stream
+    {
+        protected InputBuffer(UserData userData) { UserData = userData; }
+        public UserData UserData { get; }
+    }
+
     class BufferedReader : IDisposable
     {
         public BufferedReader(string fname)
@@ -19,12 +26,12 @@ namespace ChunkIO
         // to the very first chunk otherwise.
         //
         // TODO: Document what it does if there is no ordering guarantee.
-        public Task<ChunkStream> ReadAtPartition(Func<ChunkUserData, bool> pred)
+        public Task<InputBuffer> ReadAtPartition(Func<UserData, bool> pred)
         {
             throw new NotImplementedException();
         }
 
-        public Task<ChunkStream> ReadNext()
+        public Task<InputBuffer> ReadNext()
         {
             throw new NotImplementedException();
         }

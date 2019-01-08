@@ -15,7 +15,7 @@ namespace ChunkIO
 
         public string Name => throw new NotImplementedException();
 
-        public Task Write(ChunkUserData userData, byte[] array, int offset, int count)
+        public Task Write(UserData userData, byte[] array, int offset, int count)
         {
             throw new NotImplementedException();
         }

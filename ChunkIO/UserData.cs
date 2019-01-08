@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
-    struct ChunkUserData
+    struct UserData
     {
         public const int Size = 16;
 
@@ -159,10 +159,5 @@ namespace ChunkIO
             B14 = array[offset + 14];
             B15 = array[offset + 15];
         }
-    }
-
-    abstract class ChunkStream : Stream
-    {
-        public abstract ChunkUserData UserData { get; set; }
     }
 }
