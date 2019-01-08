@@ -42,7 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BufferedReader.cs" />
-    <Compile Include="Chunk.cs" />
+    <Compile Include="UserData.cs" />
     <Compile Include="ChunkReader.cs" />
     <Compile Include="ChunkWriter.cs" />
     <Compile Include="ByteReader.cs" />

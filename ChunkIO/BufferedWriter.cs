@@ -21,10 +21,12 @@ namespace ChunkIO
         public event Action OnClose;
     }
 
-    struct Triggers
+    class Triggers
     {
         public long? Size { get; set; }
         public TimeSpan? Age { get; set; }
+
+        public Triggers Clone() => (Triggers)MemberwiseClone();
 
         public void Validate()
         {
@@ -38,10 +40,17 @@ namespace ChunkIO
         public bool AllowRemoteFlush { get; set; } = true;
         public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
         public Triggers CloseBuffer { get; set; } = new Triggers() { Size = 64 << 10 };
-        public Triggers FlushToOS { get; set; }
-        public Triggers FlushToDisk { get; set; }
+        public Triggers FlushToOS { get; set; } = new Triggers();
+        public Triggers FlushToDisk { get; set; } = new Triggers();
 
-        public BufferedWriterOptions Clone() => (BufferedWriterOptions)MemberwiseClone();
+        public BufferedWriterOptions Clone()
+        {
+            var res = (BufferedWriterOptions)MemberwiseClone();
+            res.CloseBuffer = res.CloseBuffer?.Clone();
+            res.FlushToOS = res.FlushToOS?.Clone();
+            res.FlushToDisk = res.FlushToDisk?.Clone();
+            return res;
+        }
 
         public void Validate()
         {
@@ -49,9 +58,9 @@ namespace ChunkIO
             {
                 throw new Exception($"Invalid CompressionLevel: {CompressionLevel}");
             }
-            CloseBuffer.Validate();
-            FlushToOS.Validate();
-            FlushToDisk.Validate();
+            CloseBuffer?.Validate();
+            FlushToOS?.Validate();
+            FlushToDisk?.Validate();
         }
     }
 
