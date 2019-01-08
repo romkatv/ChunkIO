@@ -160,21 +160,22 @@ namespace ChunkIO.Test
                 {
                     writer.WritePatch(new DateTime(1), new[] { new PriceLevel() { Price = 10, Size = 100 } });
                     writer.WritePatch(new DateTime(2), new[] { new PriceLevel() { Price = 20, Size = 200 } });
-                }
-                using (var reader = new MarketDataReader(fname))
-                {
-                    int read = 0;
-                    reader.ReadAllAfter(new DateTime(0), (DateTime t, PriceLevel[] levels, bool isSnapshot) =>
+                    using (var reader = new MarketDataReader(fname))
                     {
-                        Assert.AreNotEqual(2, read);
-                        ++read;
-                        Assert.AreEqual(new DateTime(read), t);
-                        Assert.AreEqual(1, levels.Length);
-                        Assert.AreEqual(10 * read, levels[0].Price);
-                        Assert.AreEqual(100 * read, levels[0].Size);
-                        Assert.AreEqual(read == 1, isSnapshot);
-                    }).Wait();
-                    Assert.AreEqual(2, read);
+                        int read = 0;
+                        reader.FlushRemoteWriter().Wait();
+                        reader.ReadAllAfter(new DateTime(0), (DateTime t, PriceLevel[] levels, bool isSnapshot) =>
+                        {
+                            Assert.AreNotEqual(2, read);
+                            ++read;
+                            Assert.AreEqual(new DateTime(read), t);
+                            Assert.AreEqual(1, levels.Length);
+                            Assert.AreEqual(10 * read, levels[0].Price);
+                            Assert.AreEqual(100 * read, levels[0].Size);
+                            Assert.AreEqual(read == 1, isSnapshot);
+                        }).Wait();
+                        Assert.AreEqual(2, read);
+                    }
                 }
             }
             finally
