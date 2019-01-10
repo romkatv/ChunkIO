@@ -71,10 +71,17 @@ namespace ChunkIO.Test
 
         public MarketDataWriter(string fname)
         {
+            // Guarantees:
+            //
+            //   * If the writer process terminates unexpectedly, we'll lose at most 1h worth of data.
+            //   * If the OS terminates unexpectedly, we'll lose at most 3h worth of data.
             var opt = new BufferedWriterOptions();
-            // If the writer process terminates unexpectedly, we'll lose at most this much data.
-            opt.FlushToOS.Age = TimeSpan.FromHours(1);
-            // If the OS terminates unexpectedly, we'll lose at most this much data.
+            opt.CloseBuffer.Size = 64 << 10;
+            // Auto-close buffers older than 1h.
+            opt.CloseBuffer.Age = TimeSpan.FromHours(1);
+            // As soon as a buffer is closed, flush to the OS.
+            opt.FlushToOS.Age = TimeSpan.Zero;
+            // Flush all closed buffers older than 3h to disk.
             opt.FlushToDisk.Age = TimeSpan.FromHours(3);
             _writer = new BufferedWriter(fname, opt);
         }
@@ -91,11 +98,20 @@ namespace ChunkIO.Test
                     // This is a new buffer produced by _writer.NewBuffer(). Write a snapshot into it.
                     buf.UserData = Serialization.MakeUserData(t);
                     Serialization.Write(w, _book.GetSnapshot());
+                    // If the block is set up to automatically close after a certain number of bytes is
+                    // written, tell it to exclude snapshot bytes from the calculation. This is necessary
+                    // to avoid creating a new block on every call to WritePatch() if snapshots happen to
+                    // be large.
+                    if (buf.CloseAtSize.HasValue)
+                    {
+                        w.Flush();
+                        buf.CloseAtSize += buf.BytesWritten;
+                    }
                 }
                 else
                 {
-                    // This is an existing non-empty buffer returned by GetBuffer(). We we have
-                    // already written a full snapshot into it. Write a patch.
+                    // This is an existing non-empty buffer returned by GetBuffer(). We have already
+                    // written a full snapshot into it. Write a patch.
                     Serialization.Write(w, t);
                     Serialization.Write(w, patch);
                 }

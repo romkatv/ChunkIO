@@ -8,10 +8,31 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
+    // Writes to the buffer never block on IO. All data is stored in memory until the buffer is closed.
+    //
+    // Flush() doesn't do anything. You need to close the buffer to trigger file writes.
     abstract class OutputBuffer : Stream
     {
+        public DateTime CreatedAt { get; }
+
         public UserData UserData { get; set; }
         public object UserState { get; set; }
+
+        // How many bytes have been written to the buffer via its Stream methods.
+        public long BytesWritten { get; }
+
+        // When a buffer is created, CloseAtSize and CloseAtAge are set to
+        // BufferedWriterOptions.CloseBuffer.Size and BufferedWriterOptions.Age respectively.
+        //
+        // A buffer is automatically closed when all of the following conditions are true:
+        //
+        // 1. The buffer is not locked.
+        // 2. BytesWritten >= CloseAtSize || DateTime.UtcNow - CreatedAt >= CloseAtAge.
+        //
+        // An implication of this is that the buffer won't get closed if the second condition
+        // becomes true while the buffer is locked as long as it reverts to false before unlocking.
+        public long? CloseAtSize { get; set; }
+        public TimeSpan? CloseAtAge { get; set; }
 
         // Called exactly once from an arbitrary thread but never when the buffer
         // is locked. Can be called synchronously from OutputBuffer.Dispose(). After
@@ -39,7 +60,7 @@ namespace ChunkIO
     {
         public bool AllowRemoteFlush { get; set; } = true;
         public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
-        public Triggers CloseBuffer { get; set; } = new Triggers() { Size = 64 << 10 };
+        public Triggers CloseBuffer { get; set; } = new Triggers();
         public Triggers FlushToOS { get; set; } = new Triggers();
         public Triggers FlushToDisk { get; set; } = new Triggers();
 
