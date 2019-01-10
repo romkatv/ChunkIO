@@ -25,7 +25,9 @@ namespace ChunkIO
 
         public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
         {
+            if (fname is null) throw new ArgumentNullException(nameof(fname));
             if (encoder is null) throw new ArgumentNullException(nameof(encoder));
+
             // Guarantees:
             //
             //   * If the writer process terminates unexpectedly, we'll lose at most 1h worth of data.
@@ -45,6 +47,7 @@ namespace ChunkIO
             _writer = new BufferedWriter(fname, opt);
             Encoder = encoder;
 
+            // Returns t multiplied by a random number in [0.5, 1).
             TimeSpan Jitter(TimeSpan t) => TimeSpan.FromTicks((long)((0.5 * rand.NextDouble() + 0.5) * t.Ticks));
         }
 
