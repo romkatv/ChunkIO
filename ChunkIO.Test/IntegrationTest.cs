@@ -40,9 +40,6 @@ namespace ChunkIO.Test
             }
             return levels;
         }
-
-        public static UserData MakeUserData(DateTime t) => new UserData() { ULong0 = (ulong)t.Ticks };
-        public static DateTime ParseUserData(UserData userData) => new DateTime((long)userData.ULong0);
     }
 
     class OrderBook
@@ -89,6 +86,7 @@ namespace ChunkIO.Test
         // Doesn't block on IO.
         public void WritePatch(DateTime t, PriceLevel[] patch)
         {
+            if (t.Kind != DateTimeKind.Utc) throw new Exception("DateTime.Kind must be Utc");
             _book.ApplyPatch(patch);
             using (OutputBuffer buf = _writer.GetBuffer() ?? _writer.NewBuffer())
             using (var w = new BinaryWriter(buf))
@@ -96,7 +94,7 @@ namespace ChunkIO.Test
                 if (buf.UserData == null)
                 {
                     // This is a new buffer produced by _writer.NewBuffer(). Write a snapshot into it.
-                    buf.UserData = Serialization.MakeUserData(t);
+                    buf.UserData = new UserData() { Long0 = t.Ticks };
                     Serialization.Write(w, _book.GetSnapshot());
                     // If the block is set up to automatically close after a certain number of bytes is
                     // written, tell it to exclude snapshot bytes from the calculation. This is necessary
@@ -145,12 +143,12 @@ namespace ChunkIO.Test
         // available timestamp that is not greater than `start`.
         public async Task ReadAllAfter(DateTime start, Action<DateTime, PriceLevel[], bool> onOrderBook)
         {
-            InputBuffer buf = await _reader.ReadAtPartition((UserData u) => Serialization.ParseUserData(u) > start);
+            InputBuffer buf = await _reader.ReadAtPartition((UserData u) => new DateTime(u.Long0) > start);
             while (buf != null)
             {
                 using (var r = new BinaryReader(buf))
                 {
-                    onOrderBook.Invoke(Serialization.ParseUserData(buf.UserData), Serialization.ReadPriceLevels(r), true);
+                    onOrderBook.Invoke(new DateTime(buf.UserData.Long0), Serialization.ReadPriceLevels(r), true);
                     while (r.PeekChar() != -1)
                     {
                         onOrderBook.Invoke(Serialization.ReadDateTime(r), Serialization.ReadPriceLevels(r), false);

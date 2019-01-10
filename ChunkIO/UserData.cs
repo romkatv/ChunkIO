@@ -120,6 +120,42 @@ namespace ChunkIO
             }
         }
 
+        public int Int0
+        {
+            get { return (int)UInt0; }
+            set { UInt0 = (uint)value; }
+        }
+
+        public int Int1
+        {
+            get { return (int)UInt1; }
+            set { UInt1 = (uint)value; }
+        }
+
+        public int Int2
+        {
+            get { return (int)UInt2; }
+            set { UInt2 = (uint)value; }
+        }
+
+        public int Int3
+        {
+            get { return (int)UInt3; }
+            set { UInt3 = (uint)value; }
+        }
+
+        public long Long0
+        {
+            get { return (long)ULong0; }
+            set { ULong0 = (ulong)value; }
+        }
+
+        public long Long1
+        {
+            get { return (long)ULong1; }
+            set { ULong1 = (ulong)value; }
+        }
+
         public void WriteTo(byte[] array, int offset)
         {
             array[offset + 0] = B0;
