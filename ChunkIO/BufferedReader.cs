@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
+    // Readable and seakable but not writable.
     abstract class InputBuffer : Stream
     {
         protected InputBuffer(UserData userData) { UserData = userData; }

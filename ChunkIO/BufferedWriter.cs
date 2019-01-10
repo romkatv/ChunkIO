@@ -8,14 +8,14 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
-    // OutputBuffer is append-only. It's neither readable nor seakable.
+    // Append-only. Neither readable nor seakable.
     //
     // It's illegal to call any method of OutputBuffer when it isn't locked. Locked instances are returned
     // by BufferedWriter.NewBuffer() and BufferedWriter.GetBuffer(). They can be unlocked with
     // OutputBuffer.Dispose().
     //
     // Writes to the buffer never block on IO. All data is stored in memory until the buffer is closed.
-    // Flush() and Close() doesn't do anything. Dispose() unlocks the buffer.
+    // Flush() and Close() don't do anything. Dispose() unlocks the buffer.
     abstract class OutputBuffer : Stream
     {
         public DateTime CreatedAt { get; }

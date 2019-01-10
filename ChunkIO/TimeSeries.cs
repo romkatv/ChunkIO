@@ -30,16 +30,22 @@ namespace ChunkIO
             //
             //   * If the writer process terminates unexpectedly, we'll lose at most 1h worth of data.
             //   * If the OS terminates unexpectedly, we'll lose at most 3h worth of data.
+            //
+            // We flush data more often than necessary with a different factor for every file. This is done
+            // to avoid flushing a large number of files at the same time periodically.
+            var rand = new Random(fname.GetHashCode());
             var opt = new BufferedWriterOptions();
             opt.CloseBuffer.Size = 64 << 10;
             // Auto-close buffers older than 1h.
-            opt.CloseBuffer.Age = TimeSpan.FromHours(1);
+            opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
             // As soon as a buffer is closed, flush to the OS.
-            opt.FlushToOS.Age = TimeSpan.Zero;
+            opt.FlushToOS.Age = Jitter(TimeSpan.Zero);
             // Flush all closed buffers older than 3h to disk.
-            opt.FlushToDisk.Age = TimeSpan.FromHours(3);
+            opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
             _writer = new BufferedWriter(fname, opt);
             Encoder = encoder;
+
+            TimeSpan Jitter(TimeSpan t) => TimeSpan.FromTicks((long)((0.5 * rand.NextDouble() + 0.5) * t.Ticks));
         }
 
         public ITimeSeriesEncoder<T> Encoder { get; }
