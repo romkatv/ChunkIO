@@ -8,9 +8,14 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
-    // Writes to the buffer never block on IO. All data is stored in memory until the buffer is closed.
+    // OutputBuffer is append-only. It's neither readable nor seakable.
     //
-    // Flush() doesn't do anything. You need to close the buffer to trigger file writes.
+    // It's illegal to call any method of OutputBuffer when it isn't locked. Locked instances are returned
+    // by BufferedWriter.NewBuffer() and BufferedWriter.GetBuffer(). They can be unlocked with
+    // OutputBuffer.Dispose().
+    //
+    // Writes to the buffer never block on IO. All data is stored in memory until the buffer is closed.
+    // Flush() and Close() doesn't do anything. Dispose() unlocks the buffer.
     abstract class OutputBuffer : Stream
     {
         public DateTime CreatedAt { get; }
@@ -19,6 +24,8 @@ namespace ChunkIO
         public object UserState { get; set; }
 
         // How many bytes have been written to the buffer via its Stream methods.
+        // The meaning of BytesWritten is the same as Length, except that Length isn't available in
+        // OutputBuffer because it's not seakable.
         public long BytesWritten { get; }
 
         // When a buffer is created, CloseAtSize and CloseAtAge are set to
@@ -33,6 +40,8 @@ namespace ChunkIO
         // becomes true while the buffer is locked as long as it reverts to false before unlocking.
         public long? CloseAtSize { get; set; }
         public TimeSpan? CloseAtAge { get; set; }
+
+        public abstract void Abandon();
 
         // Called exactly once from an arbitrary thread but never when the buffer
         // is locked. Can be called synchronously from OutputBuffer.Dispose(). After

@@ -41,7 +41,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AsyncEnumerable.cs" />
     <Compile Include="BufferedReader.cs" />
+    <Compile Include="TimeSeries.cs" />
     <Compile Include="UserData.cs" />
     <Compile Include="ChunkReader.cs" />
     <Compile Include="ChunkWriter.cs" />

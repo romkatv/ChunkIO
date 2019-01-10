@@ -8,6 +8,67 @@ using System.Threading.Tasks;
 
 namespace ChunkIO.Test
 {
+    struct Tick<T>
+    {
+        public DateTime Timestamp { get; set; }
+        public T Value { get; set; }
+    }
+
+    abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>>
+    {
+        public DateTime EncodePrimary(Stream strm, Tick<T> tick)
+        {
+            using (var writer = new BinaryWriter(strm)) Encode(writer, tick.Value, isPrimary: true);
+            return tick.Timestamp;
+        }
+
+        public void EncodeSecondary(Stream strm, Tick<T> tick)
+        {
+            using (var writer = new BinaryWriter(strm))
+            {
+                writer.Write(tick.Timestamp.ToUniversalTime().Ticks);
+                Encode(writer, tick.Value, isPrimary: false);
+            }
+        }
+
+        protected abstract void Encode(BinaryWriter writer, T val, bool isPrimary);
+    }
+
+    abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>>
+    {
+        public void DecodePrimary(Stream strm, DateTime t, out Tick<T> val)
+        {
+            using (var reader = new BinaryReader(strm))
+            {
+                val = new Tick<T>()
+                {
+                    Timestamp = t,
+                    Value = Decode(reader, isPrimary: true),
+                };
+            }
+        }
+
+        public bool DecodeSecondary(Stream strm, out Tick<T> val)
+        {
+            if (strm.Position == strm.Length)
+            {
+                val = default(Tick<T>);
+                return false;
+            }
+            using (var reader = new BinaryReader(strm))
+            {
+                val = new Tick<T>()
+                {
+                    Timestamp = new DateTime(reader.ReadInt64(), DateTimeKind.Utc),
+                    Value = Decode(reader, isPrimary: false),
+                };
+            }
+            return true;
+        }
+
+        protected abstract T Decode(BinaryReader reader, bool isPrimary);
+    }
+
     struct PriceLevel
     {
         // If Price < 0, it's an ask (limit sell order) with price equal to -Price.
@@ -16,30 +77,10 @@ namespace ChunkIO.Test
         public decimal Size { get; set; }
     }
 
-    static class Serialization
+    struct OrderBookUpdate
     {
-        public static void Write(BinaryWriter writer, DateTime t) => writer.Write(t.Ticks);
-        public static DateTime ReadDateTime(BinaryReader reader) => new DateTime(reader.ReadInt64());
-
-        public static void Write(BinaryWriter writer, PriceLevel[] levels)
-        {
-            writer.Write(levels.Length);
-            foreach (PriceLevel lvl in levels)
-            {
-                writer.Write(lvl.Price);
-                writer.Write(lvl.Size);
-            }
-        }
-
-        public static PriceLevel[] ReadPriceLevels(BinaryReader reader)
-        {
-            var levels = new PriceLevel[reader.ReadInt32()];
-            for (int i = 0; i != levels.Length; ++i)
-            {
-                levels[i] = new PriceLevel() { Price = reader.ReadDecimal(), Size = reader.ReadDecimal() };
-            }
-            return levels;
-        }
+        public bool IsSnapshot { get; set; }
+        public PriceLevel[] PriceLevels { get; set; }
     }
 
     class OrderBook
@@ -57,138 +98,174 @@ namespace ChunkIO.Test
                 if (_levels.TryGetValue(lvl.Price, out decimal size) && size == 0) _levels.Remove(lvl.Price);
             }
         }
-
-        public void Clear() => _levels.Clear();
     }
 
-    class MarketDataWriter : IDisposable
+    class OrderBookPatchEncoder : TickEncoder<PriceLevel[]>
     {
         readonly OrderBook _book = new OrderBook();
-        readonly BufferedWriter _writer;
 
-        public MarketDataWriter(string fname)
+        protected override void Encode(BinaryWriter writer, PriceLevel[] levels, bool isPrimary)
         {
-            // Guarantees:
-            //
-            //   * If the writer process terminates unexpectedly, we'll lose at most 1h worth of data.
-            //   * If the OS terminates unexpectedly, we'll lose at most 3h worth of data.
-            var opt = new BufferedWriterOptions();
-            opt.CloseBuffer.Size = 64 << 10;
-            // Auto-close buffers older than 1h.
-            opt.CloseBuffer.Age = TimeSpan.FromHours(1);
-            // As soon as a buffer is closed, flush to the OS.
-            opt.FlushToOS.Age = TimeSpan.Zero;
-            // Flush all closed buffers older than 3h to disk.
-            opt.FlushToDisk.Age = TimeSpan.FromHours(3);
-            _writer = new BufferedWriter(fname, opt);
-        }
-
-        // Doesn't block on IO.
-        public void WritePatch(DateTime t, PriceLevel[] patch)
-        {
-            if (t.Kind != DateTimeKind.Utc) throw new Exception("DateTime.Kind must be Utc");
-            _book.ApplyPatch(patch);
-            using (OutputBuffer buf = _writer.GetBuffer() ?? _writer.NewBuffer())
-            using (var w = new BinaryWriter(buf))
+            _book.ApplyPatch(levels);
+            if (isPrimary) levels = _book.GetSnapshot();
+            writer.Write(levels.Length);
+            foreach (PriceLevel lvl in levels)
             {
-                if (buf.UserData == null)
-                {
-                    // This is a new buffer produced by _writer.NewBuffer(). Write a snapshot into it.
-                    buf.UserData = new UserData() { Long0 = t.Ticks };
-                    Serialization.Write(w, _book.GetSnapshot());
-                    // If the block is set up to automatically close after a certain number of bytes is
-                    // written, tell it to exclude snapshot bytes from the calculation. This is necessary
-                    // to avoid creating a new block on every call to WritePatch() if snapshots happen to
-                    // be large.
-                    if (buf.CloseAtSize.HasValue)
-                    {
-                        w.Flush();
-                        buf.CloseAtSize += buf.BytesWritten;
-                    }
-                }
-                else
-                {
-                    // This is an existing non-empty buffer returned by GetBuffer(). We have already
-                    // written a full snapshot into it. Write a patch.
-                    Serialization.Write(w, t);
-                    Serialization.Write(w, patch);
-                }
+                writer.Write(lvl.Price);
+                writer.Write(lvl.Size);
             }
         }
-
-        public Task Flush(bool flushToDisk) => _writer.Flush(flushToDisk);
-
-        // Can block on IO and throw. Won't do either of these if you call Flush() beforehand and
-        // wait for its successful completion.
-        public void Dispose() => _writer.Dispose();
     }
 
-    class MarketDataReader : IDisposable
+    class OrderBookUpdateDecoder : TickDecoder<OrderBookUpdate>
     {
-        readonly BufferedReader _reader;
-
-        public MarketDataReader(string fname)
+        protected override OrderBookUpdate Decode(BinaryReader reader, bool isPrimary)
         {
-            _reader = new BufferedReader(fname);
-        }
-
-        // If there a writer writing to our file, tell it to flush and wait for completion.
-        // Works even if the writer is in another process, but not when it's on another machine.
-        public Task FlushRemoteWriter() => _reader.FlushRemoteWriter();
-
-        // Reads order books from the file and invokes `onOrderBook` for each of them. The boolean parameter of
-        // the callback is true for snapshots.
-        //
-        // If `onOrderBook` is called at all, the first call is guaranteed to be a snapshot with the largest
-        // available timestamp that is not greater than `start`.
-        public async Task ReadAllAfter(DateTime start, Action<DateTime, PriceLevel[], bool> onOrderBook)
-        {
-            InputBuffer buf = await _reader.ReadAtPartition((UserData u) => new DateTime(u.Long0) > start);
-            while (buf != null)
+            var res = new OrderBookUpdate()
             {
-                using (var r = new BinaryReader(buf))
-                {
-                    onOrderBook.Invoke(new DateTime(buf.UserData.Long0), Serialization.ReadPriceLevels(r), true);
-                    while (r.PeekChar() != -1)
-                    {
-                        onOrderBook.Invoke(Serialization.ReadDateTime(r), Serialization.ReadPriceLevels(r), false);
-                    }
-                }
-                buf = await _reader.ReadNext();
+                IsSnapshot = isPrimary,
+                PriceLevels = new PriceLevel[reader.ReadInt32()]
+            };
+            for (int i = 0; i != res.PriceLevels.Length; ++i)
+            {
+                res.PriceLevels[i] = new PriceLevel() { Price = reader.ReadDecimal(), Size = reader.ReadDecimal() };
             }
+            return res;
         }
+    }
 
-        public void Dispose() => _reader.Dispose();
+    class OrderBookWriter : TimeSeriesWriter<Tick<PriceLevel[]>>
+    {
+        public OrderBookWriter(string fname) : base(fname, new OrderBookPatchEncoder()) { }
+    }
+
+    class OrderBookReader : TimeSeriesReader<Tick<OrderBookUpdate>>
+    {
+        public OrderBookReader(string fname) : base(fname, new OrderBookUpdateDecoder()) { }
+    }
+
+    struct Trade
+    {
+        public decimal Price { get; set; }
+        // If Price < 0, taker bought with price equal to -Price. Otherwise taker sold.
+        public decimal Size { get; set; }
+    }
+
+    class TradeEncoder : TickEncoder<Trade>
+    {
+        protected override void Encode(BinaryWriter writer, Trade trade, bool isPrimary)
+        {
+            writer.Write(trade.Price);
+            writer.Write(trade.Size);
+        }
+    }
+
+    class TradeDecoder : TickDecoder<Trade>
+    {
+        protected override Trade Decode(BinaryReader reader, bool isPrimary)
+        {
+            return new Trade() { Price = reader.ReadDecimal(), Size = reader.ReadDecimal() };
+        }
+    }
+
+    class TradeWriter : TimeSeriesWriter<Tick<Trade>>
+    {
+        public TradeWriter(string fname) : base(fname, new TradeEncoder()) { }
+    }
+
+    class TradeReader : TimeSeriesReader<Tick<Trade>>
+    {
+        public TradeReader(string fname) : base(fname, new TradeDecoder()) { }
     }
 
     [TestClass]
     public class IntegrationTest
     {
         [TestMethod]
-        public void ReadWriteMarketData()
+        public void ReadWriteOrderBooks()
         {
             string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
-                using (var writer = new MarketDataWriter(fname))
+                using (var writer = new OrderBookWriter(fname))
                 {
-                    writer.WritePatch(new DateTime(1), new[] { new PriceLevel() { Price = 10, Size = 100 } });
-                    writer.WritePatch(new DateTime(2), new[] { new PriceLevel() { Price = 20, Size = 200 } });
-                    using (var reader = new MarketDataReader(fname))
+                    writer.Write(new Tick<PriceLevel[]>()
                     {
-                        int read = 0;
+                        Timestamp = new DateTime(1),
+                        Value = new[] { new PriceLevel() { Price = 10, Size = 100 } }
+                    });
+                    writer.Write(new Tick<PriceLevel[]>()
+                    {
+                        Timestamp = new DateTime(2),
+                        Value = new[] { new PriceLevel() { Price = 20, Size = 200 } }
+                    });
+                    using (var reader = new OrderBookReader(fname))
+                    {
                         reader.FlushRemoteWriter().Wait();
-                        reader.ReadAllAfter(new DateTime(0), (DateTime t, PriceLevel[] levels, bool isSnapshot) =>
+                        // Production code should probably avoid materializing all data like we do here.
+                        // Instead, it should either iterate over the result of Sync() or even use
+                        // ForEachAsync() instead of Sync().
+                        Tick<OrderBookUpdate>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+                            .Sync()
+                            .Select(c => c.ToArray())
+                            .ToArray();
+                        Assert.AreEqual(1, chunks.Length);
+                        Tick<OrderBookUpdate>[] ticks = chunks[0].ToArray();
+                        Assert.AreEqual(2, ticks.Length);
+                        for (int i = 0; i != ticks.Length; ++i)
                         {
-                            Assert.AreNotEqual(2, read);
-                            ++read;
-                            Assert.AreEqual(new DateTime(read), t);
-                            Assert.AreEqual(1, levels.Length);
-                            Assert.AreEqual(10 * read, levels[0].Price);
-                            Assert.AreEqual(100 * read, levels[0].Size);
-                            Assert.AreEqual(read == 1, isSnapshot);
-                        }).Wait();
-                        Assert.AreEqual(2, read);
+                            Tick<OrderBookUpdate> tick = ticks[i];
+                            Assert.AreEqual(new DateTime(i), tick.Timestamp);
+                            Assert.AreEqual(i == 0, tick.Value.IsSnapshot);
+                            Assert.AreEqual(1, tick.Value.PriceLevels.Length);
+                            Assert.AreEqual(10 * i, tick.Value.PriceLevels[0].Price);
+                            Assert.AreEqual(100 * i, tick.Value.PriceLevels[0].Size);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(fname)) File.Delete(fname);
+            }
+        }
+
+        // This test is the same as ReadWriteOrderBooks() above but for trades.
+        [TestMethod]
+        public void ReadWriteTrades()
+        {
+            string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                using (var writer = new TradeWriter(fname))
+                {
+                    writer.Write(new Tick<Trade>()
+                    {
+                        Timestamp = new DateTime(1),
+                        Value = new Trade() { Price = 10, Size = 100 }
+                    });
+                    writer.Write(new Tick<Trade>()
+                    {
+                        Timestamp = new DateTime(2),
+                        Value = new Trade() { Price = 20, Size = 200 }
+                    });
+                    using (var reader = new TradeReader(fname))
+                    {
+                        reader.FlushRemoteWriter().Wait();
+                        Tick<Trade>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+                            .Sync()
+                            .Select(c => c.ToArray())
+                            .ToArray();
+                        Assert.AreEqual(1, chunks.Length);
+                        Tick<Trade>[] ticks = chunks[0].ToArray();
+                        Assert.AreEqual(2, ticks.Length);
+                        for (int i = 0; i != ticks.Length; ++i)
+                        {
+                            Tick<Trade> tick = ticks[i];
+                            Assert.AreEqual(new DateTime(i), tick.Timestamp);
+                            Assert.AreEqual(10 * i, tick.Value.Price);
+                            Assert.AreEqual(100 * i, tick.Value.Size);
+                        }
                     }
                 }
             }
