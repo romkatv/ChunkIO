@@ -43,6 +43,7 @@
   <ItemGroup>
     <Compile Include="AsyncEnumerable.cs" />
     <Compile Include="BufferedReader.cs" />
+    <Compile Include="Encoding.cs" />
     <Compile Include="Tick.cs" />
     <Compile Include="TimeSeries.cs" />
     <Compile Include="UserData.cs" />
