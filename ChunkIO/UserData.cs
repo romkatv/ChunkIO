@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
-    class UserData
+    struct UserData
     {
         public const int Size = 16;
 
