@@ -7,13 +7,13 @@ using System.Threading.Tasks;
 
 namespace ChunkIO
 {
-    interface ITimeSeriesEncoder<T>
+    interface ITimeSeriesEncoder<T> : IDisposable
     {
         DateTime EncodePrimary(Stream strm, T val);
         void EncodeSecondary(Stream strm, T val);
     }
 
-    interface ITimeSeriesDecoder<T>
+    interface ITimeSeriesDecoder<T> : IDisposable
     {
         void DecodePrimary(Stream strm, DateTime t, out T val);
         bool DecodeSecondary(Stream strm, out T val);
@@ -95,7 +95,17 @@ namespace ChunkIO
 
         // Can block on IO and throw. Won't do either of these if you call Flush() beforehand and
         // wait for its successful completion.
-        public void Dispose() => _writer.Dispose();
+        public void Dispose()
+        {
+            try
+            {
+                Encoder.Dispose();
+            }
+            finally
+            {
+                _writer.Dispose();
+            }
+        }
     }
 
     class TimeSeriesReader<T> : IDisposable
@@ -141,6 +151,16 @@ namespace ChunkIO
             while (decoder.DecodeSecondary(buf, out val)) yield return val;
         }
 
-        public void Dispose() => _reader.Dispose();
+        public void Dispose()
+        {
+            try
+            {
+                Decoder.Dispose();
+            }
+            finally
+            {
+                _reader.Dispose();
+            }
+        }
     }
 }

@@ -36,7 +36,7 @@ namespace ChunkIO.Test
         {
             using (var writer = new ByteWriter(_filepath))
             {
-                var bytes = Encoding.UTF8.GetBytes("<Hello>!");
+                var bytes = System.Text.Encoding.UTF8.GetBytes("<Hello>!");
                 writer.Write(bytes, 1, bytes.Length - 3);
                 Assert.AreEqual(5, writer.Position);
                 writer.Flush(false).Wait();
@@ -52,7 +52,7 @@ namespace ChunkIO.Test
             {
                 void Write(string s)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(s);
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(s);
                     writer.Write(bytes, 0, bytes.Length);
                     writer.Flush(false).Wait();
                 }
@@ -71,7 +71,7 @@ namespace ChunkIO.Test
             using (var writer = new ByteWriter(_filepath))
             {
                 Assert.AreEqual(5, writer.Position);
-                var bytes = Encoding.UTF8.GetBytes("Goodbye");
+                var bytes = System.Text.Encoding.UTF8.GetBytes("Goodbye");
                 writer.Write(bytes, 0, bytes.Length);
                 Assert.AreEqual(12, writer.Position);
                 writer.Flush(false).Wait();
@@ -99,7 +99,7 @@ namespace ChunkIO.Test
             {
                 var bytes = new byte[file.Length];
                 Assert.AreEqual(file.Read(bytes, 0, bytes.Length), bytes.Length);
-                return Encoding.UTF8.GetString(bytes);
+                return System.Text.Encoding.UTF8.GetString(bytes);
             }
         }
     }

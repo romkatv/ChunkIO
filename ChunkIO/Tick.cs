@@ -22,48 +22,68 @@ namespace ChunkIO
 
     abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>>
     {
+        BinaryWriter _writer = null;
+
+        public void Dispose() => _writer?.Dispose();
+
         public DateTime EncodePrimary(Stream strm, Tick<T> tick)
         {
-            using (var writer = new BinaryWriter(strm)) Encode(writer, tick.Value, isPrimary: true);
+            RefreshWriter(strm);
+            Encode(_writer, tick.Value, isPrimary: true);
             return tick.Timestamp;
         }
 
         public void EncodeSecondary(Stream strm, Tick<T> tick)
         {
-            using (var writer = new BinaryWriter(strm))
-            {
-                writer.Write(tick.Timestamp.ToUniversalTime().Ticks);
-                Encode(writer, tick.Value, isPrimary: false);
-            }
+            RefreshWriter(strm);
+            _writer.Write(tick.Timestamp.ToUniversalTime().Ticks);
+            Encode(_writer, tick.Value, isPrimary: false);
         }
 
         protected abstract void Encode(BinaryWriter writer, T val, bool isPrimary);
+
+        void RefreshWriter(Stream strm)
+        {
+            if (_writer != null && ReferenceEquals(strm, _writer.BaseStream)) return;
+            _writer?.Dispose();
+            _writer = new BinaryWriter(strm, System.Text.Encoding.UTF8, leaveOpen: true);
+        }
     }
 
     abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>>
     {
+        BinaryReader _reader = null;
+
+        public void Dispose() => _reader?.Dispose();
+
         public void DecodePrimary(Stream strm, DateTime t, out Tick<T> val)
         {
-            using (var reader = new BinaryReader(strm))
-            {
-                val = new Tick<T>(t, Decode(reader, isPrimary: true));
-            }
+            RefreshReader(strm);
+            val = new Tick<T>(t, Decode(_reader, isPrimary: true));
         }
 
         public bool DecodeSecondary(Stream strm, out Tick<T> val)
         {
+            RefreshReader(strm);
+            // This check assumes that BinaryReader has no internal buffer, which is true as of Jan 2019 but
+            // it's not guaranteed to stay that way. BinaryReader has PeekChar() but no PeekByte(), even though
+            // the latter would be trivial to implement and would fit the API better.
             if (strm.Position == strm.Length)
             {
                 val = default(Tick<T>);
                 return false;
             }
-            using (var reader = new BinaryReader(strm))
-            {
-                val = new Tick<T>(new DateTime(reader.ReadInt64(), DateTimeKind.Utc), Decode(reader, isPrimary: false));
-            }
+            val = new Tick<T>(new DateTime(_reader.ReadInt64(), DateTimeKind.Utc), Decode(_reader, isPrimary: false));
             return true;
         }
 
         protected abstract T Decode(BinaryReader reader, bool isPrimary);
+
+        void RefreshReader(Stream strm)
+        {
+            if (_reader != null && ReferenceEquals(strm, _reader.BaseStream)) return;
+            _reader?.Dispose();
+            _reader = new BinaryReader(strm, System.Text.Encoding.UTF8, leaveOpen: true);
+        }
     }
 }
