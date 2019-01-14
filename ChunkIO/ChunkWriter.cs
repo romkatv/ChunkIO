@@ -22,12 +22,12 @@ namespace ChunkIO {
         throw new Exception($"Invalid range for array of length {array.Length}: [{offset}, {offset} + {count})");
       }
       new Meter() {
-        ChunkBeginPosition = (ulong)_writer.Position,
-        ContentLength = (ulong)count,
+        ChunkBeginPosition = _writer.Position,
+        ContentLength = count,
       }.WriteTo(_meter);
       new ChunkHeader() {
         UserData = userData,
-        ContentLength = (ulong)count,
+        ContentLength = count,
         ContentHash = SipHash.ComputeHash(array, offset, count),
       }.WriteTo(_header);
       await WriteMetered(_header, 0, _header.Length);
@@ -40,12 +40,12 @@ namespace ChunkIO {
 
     async Task WriteMetered(byte[] array, int offset, int count) {
       while (count > 0) {
-        long p = _writer.Position % Chunk.MeterInterval;
+        int p = (int)_writer.Position % Chunk.MeterInterval;
         if (p == 0) {
           await _writer.WriteAsync(_meter, 0, _meter.Length);
           p += _meter.Length;
         }
-        int n = (int)Math.Min(count, Chunk.MeterInterval - p);
+        int n = Math.Min(count, Chunk.MeterInterval - p);
         await _writer.WriteAsync(array, offset, n);
         offset += n;
         count -= n;
