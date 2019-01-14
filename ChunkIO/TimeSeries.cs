@@ -76,9 +76,9 @@ namespace ChunkIO {
       }
     }
 
-    public Task Flush(bool flushToDisk) => _writer.Flush(flushToDisk);
+    public Task FlushAsync(bool flushToDisk) => _writer.FlushAsync(flushToDisk);
 
-    // Can block on IO and throw. Won't do either of these if you call Flush() beforehand and
+    // Can block on IO and throw. Won't do either of these if you call FlushAsync() beforehand and
     // wait for its successful completion.
     public void Dispose() {
       try {
@@ -104,7 +104,7 @@ namespace ChunkIO {
     // Works even if the writer is in another process, but not when it's on another machine.
     //
     // This method can be called concurrently with any other method and with itself.
-    public Task FlushRemoteWriter() => _reader.FlushRemoteWriter();
+    public Task FlushRemoteWriterAsync() => _reader.FlushRemoteWriterAsync();
 
     // Reads time series data from the file and returns it one buffer at a time. Each IEnumerable<T>
     // corresponds to a single buffer, the first element being "primary" and the rest "secondary".
@@ -112,10 +112,10 @@ namespace ChunkIO {
     // Chunks whose successor's primary element timestamp is not greater than t are not read.
     public IAsyncEnumerable<IEnumerable<T>> ReadAllAfter(DateTime t) {
       return new AsyncEnumerable<IEnumerable<T>>(async yield => {
-        InputBuffer buf = await _reader.ReadAtPartition((UserData u) => new DateTime(u.Long0) > t);
+        InputBuffer buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
         while (buf != null) {
           await yield.ReturnAsync(DecodeBuffer(buf, Decoder));
-          buf = await _reader.ReadNext();
+          buf = await _reader.ReadNextAsync();
         }
       });
     }

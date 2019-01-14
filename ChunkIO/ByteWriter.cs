@@ -22,8 +22,8 @@ namespace ChunkIO {
     public string Name => _file.Name;
 
     public long Position => _file.Position;
-    public Task Write(byte[] array, int offset, int count) => _file.WriteAsync(array, offset, count);
-    public Task Flush(bool flushToDisk) => _file.FlushAsync();
+    public Task WriteAsync(byte[] array, int offset, int count) => _file.WriteAsync(array, offset, count);
+    public Task FlushAsync(bool flushToDisk) => _file.FlushAsync();
 
     public void Dispose() => _file.Dispose();
   }

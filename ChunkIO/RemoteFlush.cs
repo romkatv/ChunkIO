@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO {
   static class RemoteFlush {
-    public static Task Flush(string fname, bool flushToDisk) {
+    public static Task FlushAsync(string fname, bool flushToDisk) {
       throw new NotImplementedException();
     }
 

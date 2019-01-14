@@ -23,15 +23,15 @@ namespace ChunkIO {
     // to the very first chunk otherwise.
     //
     // TODO: Document what it does if there is no ordering guarantee.
-    public Task<InputBuffer> ReadAtPartition(Func<UserData, bool> pred) {
+    public Task<InputBuffer> ReadAtPartitionAsync(Func<UserData, bool> pred) {
       throw new NotImplementedException();
     }
 
-    public Task<InputBuffer> ReadNext() {
+    public Task<InputBuffer> ReadNextAsync() {
       throw new NotImplementedException();
     }
 
-    public Task FlushRemoteWriter() {
+    public Task FlushRemoteWriterAsync() {
       throw new NotImplementedException();
     }
 

@@ -30,9 +30,9 @@ namespace ChunkIO.Test {
     public void OneWrite() {
       using (var writer = new ByteWriter(_filepath)) {
         var bytes = System.Text.Encoding.UTF8.GetBytes("<Hello>!");
-        writer.Write(bytes, 1, bytes.Length - 3);
+        writer.WriteAsync(bytes, 1, bytes.Length - 3);
         Assert.AreEqual(5, writer.Position);
-        writer.Flush(false).Wait();
+        writer.FlushAsync(false).Wait();
         Assert.AreEqual("Hello", ReadFile());
       }
       Assert.AreEqual("Hello", ReadFile());
@@ -43,8 +43,8 @@ namespace ChunkIO.Test {
       using (var writer = new ByteWriter(_filepath)) {
         void Write(string s) {
           var bytes = System.Text.Encoding.UTF8.GetBytes(s);
-          writer.Write(bytes, 0, bytes.Length);
-          writer.Flush(false).Wait();
+          writer.WriteAsync(bytes, 0, bytes.Length);
+          writer.FlushAsync(false).Wait();
         }
         Write("Hello");
         Write("Goodbye");
@@ -60,9 +60,9 @@ namespace ChunkIO.Test {
       using (var writer = new ByteWriter(_filepath)) {
         Assert.AreEqual(5, writer.Position);
         var bytes = System.Text.Encoding.UTF8.GetBytes("Goodbye");
-        writer.Write(bytes, 0, bytes.Length);
+        writer.WriteAsync(bytes, 0, bytes.Length);
         Assert.AreEqual(12, writer.Position);
-        writer.Flush(false).Wait();
+        writer.FlushAsync(false).Wait();
         Assert.AreEqual("HelloGoodbye", ReadFile());
       }
       Assert.AreEqual("HelloGoodbye", ReadFile());

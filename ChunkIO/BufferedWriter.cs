@@ -109,13 +109,13 @@ namespace ChunkIO {
 
     // If there is current buffer, waits until it gets unlocked and writes its content to
     // the underlying ChunkWriter. Otherwise does nothing.
-    public Task CloseBuffer() {
+    public Task CloseBufferAsync() {
       throw new NotImplementedException();
     }
 
     // 1. If there is current buffer, waits until it gets unlocked and closes it.
     // 2. Flushes the underlying ChunkWriter.
-    public Task Flush(bool flushToDisk) {
+    public Task FlushAsync(bool flushToDisk) {
       throw new NotImplementedException();
     }
 

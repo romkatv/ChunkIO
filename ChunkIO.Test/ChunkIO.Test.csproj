@@ -45,6 +45,7 @@
     <Compile Include="ByteWriterTest.cs" />
     <Compile Include="IntegrationTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SipHashTest.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ChunkIO\ChunkIO.csproj">

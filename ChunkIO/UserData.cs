@@ -132,42 +132,42 @@ namespace ChunkIO {
       set { ULong1 = (ulong)value; }
     }
 
-    public void WriteTo(byte[] array, int offset) {
-      array[offset + 0] = B0;
-      array[offset + 1] = B1;
-      array[offset + 2] = B2;
-      array[offset + 3] = B3;
-      array[offset + 4] = B4;
-      array[offset + 5] = B5;
-      array[offset + 6] = B6;
-      array[offset + 7] = B7;
-      array[offset + 8] = B8;
-      array[offset + 9] = B9;
-      array[offset + 10] = B10;
-      array[offset + 11] = B11;
-      array[offset + 12] = B12;
-      array[offset + 13] = B13;
-      array[offset + 14] = B14;
-      array[offset + 15] = B15;
+    public void WriteTo(byte[] array, ref int offset) {
+      array[offset++] = B0;
+      array[offset++] = B1;
+      array[offset++] = B2;
+      array[offset++] = B3;
+      array[offset++] = B4;
+      array[offset++] = B5;
+      array[offset++] = B6;
+      array[offset++] = B7;
+      array[offset++] = B8;
+      array[offset++] = B9;
+      array[offset++] = B10;
+      array[offset++] = B11;
+      array[offset++] = B12;
+      array[offset++] = B13;
+      array[offset++] = B14;
+      array[offset++] = B15;
     }
 
-    public void ReadFrom(byte[] array, int offset) {
-      B0 = array[offset + 0];
-      B1 = array[offset + 1];
-      B2 = array[offset + 2];
-      B3 = array[offset + 3];
-      B4 = array[offset + 4];
-      B5 = array[offset + 5];
-      B6 = array[offset + 6];
-      B7 = array[offset + 7];
-      B8 = array[offset + 8];
-      B9 = array[offset + 9];
-      B10 = array[offset + 10];
-      B11 = array[offset + 11];
-      B12 = array[offset + 12];
-      B13 = array[offset + 13];
-      B14 = array[offset + 14];
-      B15 = array[offset + 15];
+    public void ReadFrom(byte[] array, ref int offset) {
+      B0 = array[offset++];
+      B1 = array[offset++];
+      B2 = array[offset++];
+      B3 = array[offset++];
+      B4 = array[offset++];
+      B5 = array[offset++];
+      B6 = array[offset++];
+      B7 = array[offset++];
+      B8 = array[offset++];
+      B9 = array[offset++];
+      B10 = array[offset++];
+      B11 = array[offset++];
+      B12 = array[offset++];
+      B13 = array[offset++];
+      B14 = array[offset++];
+      B15 = array[offset++];
     }
   }
 }
