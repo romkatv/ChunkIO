@@ -31,60 +31,55 @@ namespace ChunkIO {
     public long Length => _reader.Length;
 
     public async Task<IChunk> ReadBeforeAsync(long position) {
-      position = Math.Min(position, _reader.Length);
-      while (true) {
-        if (position < 0) return null;
-        Meter? meter = await ReadMeter(MeterBefore(position));
-        if (!meter.HasValue) {
-          position -= MeterInterval;
-          continue;
-        }
+      if (position < 0) throw new Exception($"Negative position: {position}");
+      for (long m = MeterBefore(Math.Min(position, _reader.Length)); m >= 0; m -= MeterInterval) { 
+        Meter? meter = await ReadMeter(m);
+        if (!meter.HasValue) continue;
+        IChunk res = await Scan(meter.Value.ChunkBeginPosition);
+        if (res != null) return res;
+        m = MeterBefore(meter.Value.ChunkBeginPosition);
+        position = meter.Value.ChunkBeginPosition - 1;
+      }
+      return null;
+
+      async Task<IChunk> Scan(long h) {
         ChunkHeader? res = null;
-        long h = meter.Value.ChunkBeginPosition;
         while (true) {
           ChunkHeader? header = await ReadChunkHeader(h);
           if (!header.HasValue) break;
           res = header;
-          long? next = MeteredPosition(h, ChunkHeader.Size + header.Value.ContentLength);
-          if (!next.HasValue || next > position) break;
-          h = next.Value;
+          long next = header.Value.EndPosition(h).Value;
+          if (next > position) break;
+          h = next;
         }
-        if (res.HasValue) return new Chunk(this, h, res.Value);
-        position = meter.Value.ChunkBeginPosition - 1;
+        return res.HasValue ? new Chunk(this, h, res.Value) : null;
       }
     }
 
     public async Task<IChunk> ReadAfterAsync(long position) {
+      if (position < 0) throw new Exception($"Negative position: {position}");
       if (position == _last) {
         IChunk res = await Scan(position);
         if (res != null) return res;
       }
-
-      for (long m = MeterBefore(Math.Max(position, 0)); m < _reader.Length; m += MeterInterval) {
+      for (long m = MeterBefore(position); m < _reader.Length; m += MeterInterval) {
         Meter? meter = await ReadMeter(m);
-        if (!meter.HasValue) {
-          m += MeterInterval;
-          continue;
-        }
+        if (!meter.HasValue) continue;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
-        long next = MeteredPosition(meter.Value.ChunkBeginPosition, ChunkHeader.Size + meter.Value.ContentLength).Value;
-        m = MeterBefore(next - 1);
       }
-
       return null;
 
       async Task<IChunk> Scan(long h) {
         while (true) {
           ChunkHeader? header = await ReadChunkHeader(h);
           if (!header.HasValue) return null;
-          long? next = MeteredPosition(h, ChunkHeader.Size + header.Value.ContentLength);
-          if (!next.HasValue) return null;
+          long next = header.Value.EndPosition(h).Value;
           if (h >= position) {
-            _last = next.Value;
+            _last = next;
             return new Chunk(this, h, header.Value);
           }
-          h = next.Value;
+          h = next;
         }
       }
     }
@@ -94,13 +89,12 @@ namespace ChunkIO {
     static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
 
     async Task<Meter?> ReadMeter(long pos) {
-      Debug.Assert(pos % MeterInterval == 0);
+      Debug.Assert(pos >= 0 && pos % MeterInterval == 0);
       _reader.Seek(pos);
       if (await _reader.ReadAsync(_meter, 0, _meter.Length) != _meter.Length) return null;
       var res = new Meter();
       if (!res.ReadFrom(_meter)) return null;
       if (res.ChunkBeginPosition >= pos) return null;
-      if (MeteredPosition(res.ChunkBeginPosition, res.ContentLength) <= pos + Meter.Size) return null;
       return res;
     }
 
@@ -108,21 +102,24 @@ namespace ChunkIO {
       if (!await ReadMetered(pos, _header, 0, _header.Length)) return null;
       var res = new ChunkHeader();
       if (!res.ReadFrom(_header)) return null;
-      if (!MeteredPosition(pos, ChunkHeader.Size + res.ContentLength).HasValue) return null;
+      if (!res.EndPosition(pos).HasValue) return null;
       return res;
     }
 
     async Task<bool> ReadMetered(long pos, byte[] array, int offset, int count) {
-      Debug.Assert(MeteredPosition(pos, count).HasValue);
-      if (MeteredPosition(pos, count) > _reader.Length) return false;
-      pos = MeteredPosition(pos, 0).Value;
+      Debug.Assert(array != null);
+      Debug.Assert(offset >= 0);
+      Debug.Assert(array.Length - offset >= count);
+      if (!(MeteredPosition(pos, count) <= _reader.Length)) return false;
       while (count > 0) {
+        Debug.Assert(IsValidPosition(pos));
+        if (pos % MeterInterval == 0) pos += Meter.Size;
         _reader.Seek(pos);
-        int n = Math.Min(count, (int)(MeterInterval - pos % MeterInterval));
+        int n = Math.Min(count, MeterInterval - (int)(pos % MeterInterval));
         if (await _reader.ReadAsync(array, offset, n) != n) return false;
+        pos += n;
         offset += n;
         count -= n;
-        pos = MeteredPosition(pos, n).Value;
       }
       return true;
     }
@@ -138,14 +135,14 @@ namespace ChunkIO {
       }
 
       public long BeginPosition { get; }
-      public long EndPosition => MeteredPosition(BeginPosition, ChunkHeader.Size + ContentLength).Value;
+      public long EndPosition => _header.EndPosition(BeginPosition).Value;
       public int ContentLength => _header.ContentLength;
       public UserData UserData => _header.UserData;
 
       public async Task<bool> ReadContentAsync(byte[] array, int offset) {
         if (array == null) throw new ArgumentNullException(nameof(array));
         if (offset < 0) throw new ArgumentException($"Negative offset: {offset}");
-        if (array.Length - ContentLength <= offset)  throw new ArgumentException($"Array too short: {array.Length}");
+        if (array.Length - offset < ContentLength)  throw new ArgumentException($"Array too short: {array.Length}");
         long pos = MeteredPosition(BeginPosition, ChunkHeader.Size).Value;
         return await _reader.ReadMetered(pos, array, offset, ContentLength) &&
                SipHash.ComputeHash(array, offset, ContentLength) == _header.ContentHash;

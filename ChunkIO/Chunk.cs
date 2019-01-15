@@ -33,6 +33,12 @@ namespace ChunkIO {
       Debug.Assert(IsValidPosition((long)res));
       return (long)res;
     }
+
+    public static bool VerifyHash(byte[] array, ref int offset) {
+      ulong expected = SipHash.ComputeHash(array, 0, offset);
+      ulong actual = Encoding.UInt64.Read(array, ref offset);
+      return expected == actual;
+    }
   }
 
   struct ChunkHeader {
@@ -43,8 +49,8 @@ namespace ChunkIO {
     public ulong ContentHash { get; set; }
 
     public void WriteTo(byte[] array) {
-      if (!IsValid()) throw new Exception("Internal error: writing invalid ChunkHeader");
       Debug.Assert(array.Length >= Size);
+      Debug.Assert(Chunk.IsValidContentLength(ContentLength));
       int offset = 0;
       UserData.WriteTo(array, ref offset);
       Encoding.UInt64.Write(array, ref offset, (ulong)ContentLength);
@@ -60,26 +66,22 @@ namespace ChunkIO {
       if (!Chunk.IsValidContentLength(len)) return false;
       ContentLength = (int)len;
       ContentHash = Encoding.UInt64.Read(array, ref offset);
-      ulong expectedHash = SipHash.ComputeHash(array, 0, offset);
-      ulong actualHash = Encoding.UInt64.Read(array, ref offset);
-      return expectedHash == actualHash && IsValid();
+      return Chunk.VerifyHash(array, ref offset);
     }
 
-    bool IsValid() => Chunk.IsValidContentLength(ContentLength);
+    public long? EndPosition(long begin) => Chunk.MeteredPosition(begin, (long)ContentLength + Size);
   }
 
   struct Meter {
-    public const int Size = 3 * Encoding.UInt64.Size;
+    public const int Size = 2 * Encoding.UInt64.Size;
 
     public long ChunkBeginPosition { get; set; }
-    public int ContentLength { get; set; }
 
     public void WriteTo(byte[] array) {
-      if (!IsValid()) throw new Exception("Internal error: writing invalid Meter");
       Debug.Assert(array.Length >= Size);
+      Debug.Assert(Chunk.IsValidPosition(ChunkBeginPosition));
       int offset = 0;
       Encoding.UInt64.Write(array, ref offset, (ulong)ChunkBeginPosition);
-      Encoding.UInt64.Write(array, ref offset, (ulong)ContentLength);
       Encoding.UInt64.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
     }
 
@@ -89,17 +91,7 @@ namespace ChunkIO {
       ulong pos = Encoding.UInt64.Read(array, ref offset);
       if (!Chunk.IsValidPosition(pos)) return false;
       ChunkBeginPosition = (long)pos;
-      ulong len = Encoding.UInt64.Read(array, ref offset);
-      if (!Chunk.IsValidContentLength(len)) return false;
-      ContentLength = (int)len;
-      ulong expectedHash = SipHash.ComputeHash(array, 0, offset);
-      ulong actualHash = Encoding.UInt64.Read(array, ref offset);
-      return expectedHash == actualHash && IsValid();
+      return Chunk.VerifyHash(array, ref offset);
     }
-
-    bool IsValid() =>
-        Chunk.IsValidContentLength(ContentLength) &&
-        Chunk.IsValidPosition(ChunkBeginPosition) &&
-        Chunk.MeteredPosition(ChunkBeginPosition, (long)ChunkHeader.Size + ContentLength).HasValue;
   }
 }

@@ -18,18 +18,22 @@ namespace ChunkIO {
 
     public async Task WriteAsync(UserData userData, byte[] array, int offset, int count) {
       if (array == null) throw new ArgumentNullException(nameof(array));
-      if (offset < 0 || count < 0 || array.Length - count <= offset) {
+      if (offset < 0 || count < 0 || array.Length - offset < count) {
         throw new Exception($"Invalid range for array of length {array.Length}: [{offset}, {offset} + {count})");
       }
-      new Meter() {
-        ChunkBeginPosition = _writer.Position,
-        ContentLength = count,
-      }.WriteTo(_meter);
-      new ChunkHeader() {
+      if (count > Chunk.MaxContentLength) throw new Exception($"Record too big: {count}");
+      await WritePadding();
+      var meter = new Meter() { ChunkBeginPosition = _writer.Position };
+      var header = new ChunkHeader() {
         UserData = userData,
         ContentLength = count,
         ContentHash = SipHash.ComputeHash(array, offset, count),
-      }.WriteTo(_header);
+      };
+      if (!header.EndPosition(meter.ChunkBeginPosition).HasValue) {
+        throw new Exception($"File too big: {meter.ChunkBeginPosition}");
+      }
+      meter.WriteTo(_meter);
+      header.WriteTo(_header);
       await WriteMetered(_header, 0, _header.Length);
       await WriteMetered(array, offset, count);
     }
@@ -38,9 +42,13 @@ namespace ChunkIO {
 
     public void Dispose() => _writer.Dispose();
 
+    async Task WritePadding() {
+      while (!Chunk.IsValidPosition(_writer.Position)) await _writer.WriteAsync(new byte[] { 0 }, 0, 1);
+    }
+
     async Task WriteMetered(byte[] array, int offset, int count) {
       while (count > 0) {
-        int p = (int)_writer.Position % Chunk.MeterInterval;
+        int p = (int)(_writer.Position % Chunk.MeterInterval);
         if (p == 0) {
           await _writer.WriteAsync(_meter, 0, _meter.Length);
           p += _meter.Length;
