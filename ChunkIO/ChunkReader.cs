@@ -108,6 +108,7 @@ namespace ChunkIO {
       if (!await ReadMetered(pos, _header, 0, _header.Length)) return null;
       var res = new ChunkHeader();
       if (!res.ReadFrom(_header)) return null;
+      if (!MeteredPosition(pos, ChunkHeader.Size + res.ContentLength).HasValue) return null;
       return res;
     }
 
