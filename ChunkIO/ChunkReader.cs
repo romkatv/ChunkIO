@@ -21,6 +21,7 @@ namespace ChunkIO {
     readonly ByteReader _reader;
     readonly byte[] _meter = new byte[Meter.Size];
     readonly byte[] _header = new byte[ChunkHeader.Size];
+    long _last = 0;
 
     public ChunkReader(string fname) {
       _reader = new ByteReader(fname);
@@ -54,26 +55,37 @@ namespace ChunkIO {
     }
 
     public async Task<IChunk> ReadAfterAsync(long position) {
-      long m = Math.Max(position, 0);
-      while (true) {
-        if (m >= _reader.Length) return null;
-        Meter? meter = await ReadMeter(MeterBefore(m));
+      if (position == _last) {
+        IChunk res = await Scan(position);
+        if (res != null) return res;
+      }
+
+      for (long m = MeterBefore(Math.Max(position, 0)); m < _reader.Length; m += MeterInterval) {
+        Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) {
           m += MeterInterval;
           continue;
         }
-        long h = meter.Value.ChunkBeginPosition;
+        IChunk res = await Scan(meter.Value.ChunkBeginPosition);
+        if (res != null) return res;
+        long next = MeteredPosition(meter.Value.ChunkBeginPosition, ChunkHeader.Size + meter.Value.ContentLength).Value;
+        m = MeterBefore(next - 1);
+      }
+
+      return null;
+
+      async Task<IChunk> Scan(long h) {
         while (true) {
           ChunkHeader? header = await ReadChunkHeader(h);
-          if (!header.HasValue) break;
-          if (h >= position) return new Chunk(this, h, header.Value);
+          if (!header.HasValue) return null;
           long? next = MeteredPosition(h, ChunkHeader.Size + header.Value.ContentLength);
-          if (!next.HasValue) break;
+          if (!next.HasValue) return null;
+          if (h >= position) {
+            _last = next.Value;
+            return new Chunk(this, h, header.Value);
+          }
           h = next.Value;
         }
-        m = Math.Max(
-            m + MeterInterval,
-            MeteredPosition(meter.Value.ChunkBeginPosition, ChunkHeader.Size + meter.Value.ContentLength).Value);
       }
     }
 
