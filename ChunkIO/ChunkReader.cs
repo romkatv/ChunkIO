@@ -30,22 +30,30 @@ namespace ChunkIO {
     public long Length => _reader.Length;
 
     public async Task<IChunk> ReadBeforeAsync(long position) {
-      if (position < 0) return null;
-      long fsize = _reader.Length;
-      if (fsize < Meter.Size) return null;
-      long m = (fsize - Meter.Size) / MeterInterval * MeterInterval;
-      if (m - position >= MeterInterval) m = (position + MeterInterval - 1) % MeterInterval;
+      position = Math.Min(position, _reader.Length);
       while (true) {
-        Meter? meter = await ReadMeter(m);
+        if (position < 0) return null;
+        Meter? meter = await ReadMeter(MeterBefore(position));
         if (!meter.HasValue) {
-          if (m == 0) return null;
-          m -= MeterInterval;
+          position -= MeterInterval;
           continue;
         }
-        ChunkHeader? header = await ReadChunkHeader(meter.Value.ChunkBeginPosition);
-        // TODO: Implement me.
+        ChunkHeader? res = null;
+        long h = meter.Value.ChunkBeginPosition;
+        while (true) {
+          ChunkHeader? header = await ReadChunkHeader(h);
+          if (!header.HasValue) break;
+          res = header;
+          long? next = MeteredPosition(h, ChunkHeader.Size + header.Value.ContentLength);
+          if (!next.HasValue || next > position) break;
+          h = next.Value;
+        }
+        if (res.HasValue) return new Chunk(this, h, res.Value);
+        position = meter.Value.ChunkBeginPosition - 1;
       }
     }
+
+    static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
 
     public Task<IChunk> ReadAfterAsync(long position) {
       throw new NotImplementedException();
@@ -59,6 +67,8 @@ namespace ChunkIO {
       if (await _reader.ReadAsync(_meter, 0, _meter.Length) != _meter.Length) return null;
       var res = new Meter();
       if (!res.ReadFrom(_meter)) return null;
+      if (res.ChunkBeginPosition >= pos) return null;
+      if (MeteredPosition(res.ChunkBeginPosition, res.ContentLength) <= pos + Meter.Size) return null;
       return res;
     }
 
