@@ -53,13 +53,33 @@ namespace ChunkIO {
       }
     }
 
-    static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
-
-    public Task<IChunk> ReadAfterAsync(long position) {
-      throw new NotImplementedException();
+    public async Task<IChunk> ReadAfterAsync(long position) {
+      long m = Math.Max(position, 0);
+      while (true) {
+        if (m >= _reader.Length) return null;
+        Meter? meter = await ReadMeter(MeterBefore(m));
+        if (!meter.HasValue) {
+          m += MeterInterval;
+          continue;
+        }
+        long h = meter.Value.ChunkBeginPosition;
+        while (true) {
+          ChunkHeader? header = await ReadChunkHeader(h);
+          if (!header.HasValue) break;
+          if (h >= position) return new Chunk(this, h, header.Value);
+          long? next = MeteredPosition(h, ChunkHeader.Size + header.Value.ContentLength);
+          if (!next.HasValue) break;
+          h = next.Value;
+        }
+        m = Math.Max(
+            m + MeterInterval,
+            MeteredPosition(meter.Value.ChunkBeginPosition, ChunkHeader.Size + meter.Value.ContentLength).Value);
+      }
     }
 
     public void Dispose() => _reader.Dispose();
+
+    static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
 
     async Task<Meter?> ReadMeter(long pos) {
       Debug.Assert(pos % MeterInterval == 0);
