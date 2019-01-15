@@ -30,8 +30,9 @@ namespace ChunkIO {
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 
+    // Negative position is allowed.
     public async Task<IChunk> ReadBeforeAsync(long position) {
-      if (position < 0) throw new Exception($"Negative position: {position}");
+      if (position < 0) return null;
       for (long m = MeterBefore(Math.Min(position, _reader.Length)); m >= 0; m -= MeterInterval) { 
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
@@ -56,13 +57,13 @@ namespace ChunkIO {
       }
     }
 
+    // Negative position is allowed.
     public async Task<IChunk> ReadAfterAsync(long position) {
-      if (position < 0) throw new Exception($"Negative position: {position}");
       if (position == _last) {
         IChunk res = await Scan(position);
         if (res != null) return res;
       }
-      for (long m = MeterBefore(position); m < _reader.Length; m += MeterInterval) {
+      for (long m = MeterBefore(Math.Max(0, position)); m < _reader.Length; m += MeterInterval) {
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
