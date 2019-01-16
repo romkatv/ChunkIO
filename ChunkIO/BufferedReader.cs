@@ -24,36 +24,31 @@ namespace ChunkIO {
 
     public string Name => _reader.Name;
 
-    // If false chunks cannot follow true chunks, seeks to the last false chunk if there are any or
-    // to the very first chunk otherwise.
+    // In order:
     //
-    // TODO: Document what it does if there is no ordering guarantee.
+    //   * If the data source is empty, returns null.
+    //   * Else if the predicate evaluates to true on the first buffer, returns the first buffer.
+    //   * Else returns a buffer for which the predicate evaluates to false and either it's the
+    //     last buffer or the predicate evaluates to true on the next buffer. If there are multiple
+    //     buffers satisfying these requirements, it's unspecified which one is returned.
+    //
+    // Implication: If false buffers cannot follow true buffers, returns the last false buffer if
+    // there are any or the very first buffer otherwise.
     public async Task<InputBuffer> ReadAtPartitionAsync(Func<UserData, bool> pred) {
-      if (pred is null) throw new ArgumentNullException(nameof(pred));
-      IChunk left = await _reader.ReadAfterAsync(0);
+      if (pred == null) throw new ArgumentNullException(nameof(pred));
+      IChunk left = await _reader.ReadFirstAsync(0, long.MaxValue);
+      if (left == null || pred.Invoke(left.UserData)) return await MakeBuffer(left, Scan.Forward);
+      IChunk right = await _reader.ReadLastAsync(0, long.MaxValue);
+      if (right == null || !pred.Invoke(right.UserData)) return await MakeBuffer(right, Scan.Backward);
       while (true) {
-        if (left is null) return null;
-        if (!pred.Invoke(left.UserData)) break;
-        InputBuffer res = await MakeBuffer(left);
-        if (res != null) return res;
-        left = await _reader.ReadAfterAsync(left.EndPosition);
+        IChunk mid = await ReadMiddle(left.EndPosition, right.BeginPosition);
+        if (mid == null) return await MakeBuffer(left, Scan.Backward) ?? await MakeBuffer(left, Scan.Forward);
+        if (pred.Invoke(mid.UserData)) {
+          right = mid;
+        } else {
+          left = mid;
+        }
       }
-      IChunk right = await _reader.ReadBeforeAsync(long.MaxValue);
-      while (true) {
-        if (right is null) return null;
-        if (right.BeginPosition < left.BeginPosition) return null;
-        if (pred.Invoke(right.UserData)) break;
-        InputBuffer res = await MakeBuffer(right);
-        if (res != null) return res;
-        right = await _reader.ReadBeforeAsync(right.BeginPosition - 1);
-      }
-      Debug.Assert(left != null && right != null && left.BeginPosition <= right.BeginPosition);
-      if (left.EndPosition > right.BeginPosition) return null;
-      if (left.EndPosition == right.BeginPosition) return await MakeBuffer(left) ?? await MakeBuffer(right);
-      long p = left.EndPosition + (right.BeginPosition - left.EndPosition) / 2;
-      IChunk mid = await _reader.ReadAfterAsync(p);
-      // TODO: Implement me.
-      throw new NotImplementedException();
     }
 
     public Task<InputBuffer> ReadNextAsync() {
@@ -66,28 +61,26 @@ namespace ChunkIO {
 
     public void Dispose() => _reader.Dispose();
 
-    static async Task<InputBuffer> MakeBuffer(IChunk chunk) {
-      var content = new byte[chunk.ContentLength];
-      if (!await chunk.ReadContentAsync(content, 0)) return null;
-      using (var input = new MemoryStream(chunk.ContentLength)) {
-        input.Write(content, 0, content.Length);
-        input.Seek(0, SeekOrigin.Begin);
-        using (var deflate = new DeflateStream(input, CompressionMode.Decompress, leaveOpen: true)) {
-          var output = new MemoryStream(4 * chunk.ContentLength);
-          var block = new byte[1024];
-          try {
-            while (true) {
-              int n = deflate.Read(block, 0, block.Length);
-              if (n <= 0) break;
-              output.Write(block, 0, n);
-            }
-          } catch {
-            output.Dispose();
-            return null;
-          }
-          output.Seek(0, SeekOrigin.Begin);
-          return new Buffer(output, chunk.UserData);
-        }
+    async Task<IChunk> ReadMiddle(long from, long to) {
+      if (to <= from) return null;
+      if (to == from + 1) return await _reader.ReadFirstAsync(from, to);
+      long mid = from + (to - from) / 2;
+      return await _reader.ReadFirstAsync(mid, to) ?? await _reader.ReadLastAsync(from, mid);
+    }
+
+    enum Scan {
+      Forward,
+      Backward
+    }
+
+    async Task<InputBuffer> MakeBuffer(IChunk chunk, Scan scan) {
+      while (true) {
+        if (chunk == null) return null;
+        InputBuffer res = await Buffer.New(chunk);
+        if (res != null) return res;
+        chunk = scan == Scan.Forward
+            ? await _reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue)
+            : await _reader.ReadLastAsync(0, chunk.BeginPosition);
       }
     }
 
@@ -96,6 +89,31 @@ namespace ChunkIO {
 
       public Buffer(MemoryStream strm, UserData userData) : base(userData) {
         _strm = strm;
+      }
+
+      public static async Task<InputBuffer> New(IChunk chunk) {
+        var content = new byte[chunk.ContentLength];
+        if (!await chunk.ReadContentAsync(content, 0)) return null;
+        using (var input = new MemoryStream(chunk.ContentLength)) {
+          input.Write(content, 0, content.Length);
+          input.Seek(0, SeekOrigin.Begin);
+          using (var deflate = new DeflateStream(input, CompressionMode.Decompress, leaveOpen: true)) {
+            var output = new MemoryStream(4 * chunk.ContentLength);
+            var block = new byte[1024];
+            try {
+              while (true) {
+                int n = deflate.Read(block, 0, block.Length);
+                if (n <= 0) break;
+                output.Write(block, 0, n);
+              }
+            } catch {
+              output.Dispose();
+              return null;
+            }
+            output.Seek(0, SeekOrigin.Begin);
+            return new Buffer(output, chunk.UserData);
+          }
+        }
       }
 
       // There is an override for every public virtual/abstract method. These four are the only overrides
