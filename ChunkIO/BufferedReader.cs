@@ -17,6 +17,7 @@ namespace ChunkIO {
 
   class BufferedReader : IDisposable {
     readonly ChunkReader _reader;
+    long _last = 0;
 
     public BufferedReader(string fname) {
       _reader = new ChunkReader(fname);
@@ -51,9 +52,10 @@ namespace ChunkIO {
       }
     }
 
-    public Task<InputBuffer> ReadNextAsync() {
-      throw new NotImplementedException();
-    }
+    // Returns the buffer that follows the last buffer returned by ReadAtPartitionAsync() or ReadNextAsync(),
+    // or null if there aren't any.
+    public async Task<InputBuffer> ReadNextAsync() =>
+      await MakeBuffer(await _reader.ReadFirstAsync(_last, long.MaxValue), Scan.Forward);
 
     public Task FlushRemoteWriterAsync() {
       throw new NotImplementedException();
@@ -77,7 +79,10 @@ namespace ChunkIO {
       while (true) {
         if (chunk == null) return null;
         InputBuffer res = await Buffer.New(chunk);
-        if (res != null) return res;
+        if (res != null) {
+          _last = chunk.EndPosition;
+          return res;
+        }
         chunk = scan == Scan.Forward
             ? await _reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue)
             : await _reader.ReadLastAsync(0, chunk.BeginPosition);
