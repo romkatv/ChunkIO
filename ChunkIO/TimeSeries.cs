@@ -50,10 +50,10 @@ namespace ChunkIO {
 
     // Doesn't block on IO.
     public void Write(T val) {
-      using (OutputBuffer buf = _writer.GetBuffer()) {
+      using (IOutputBuffer buf = _writer.GetBuffer()) {
         if (buf != null) {
           try {
-            Encoder.EncodeSecondary(buf, val);
+            Encoder.EncodeSecondary(buf.Stream, val);
           } catch {
             buf.Abandon();
             throw;
@@ -61,9 +61,9 @@ namespace ChunkIO {
           return;
         }
       }
-      using (OutputBuffer buf = _writer.NewBuffer()) {
+      using (IOutputBuffer buf = _writer.NewBuffer()) {
         try {
-          buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf, val).ToUniversalTime().Ticks };
+          buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
           // If the block is set up to automatically close after a certain number of bytes is
           // written, tell it to exclude snapshot bytes from the calculation. This is necessary
           // to avoid creating a new block on every call to Write() if snapshots happen to

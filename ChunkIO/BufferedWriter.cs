@@ -16,16 +16,21 @@ namespace ChunkIO {
   //
   // Writes to the buffer never block on IO. All data is stored in memory until the buffer is closed.
   // Flush() doesn't do anything. Dispose() and Close() unlock the buffer (they are equivalent).
-  abstract class OutputBuffer : Stream {
-    public DateTime CreatedAt { get; } = DateTime.UtcNow;
+  interface IOutputBuffer : IDisposable {
+    // Append-only. Neither readable nor seakable. Flush() and FlushAsync() have no effect.
+    //
+    // The user MUST NOT Dispose() or Close() the stream.
+    Stream Stream { get; }
 
-    public UserData UserData { get; set; }
-    public object UserState { get; set; }
+    DateTime CreatedAt { get; }
+
+    UserData UserData { get; set; }
+    object UserState { get; set; }
 
     // How many bytes have been written to the buffer via its Stream methods.
     // The meaning of BytesWritten is the same as Length, except that Length isn't available in
     // OutputBuffer because it's not seakable.
-    public abstract long BytesWritten { get; }
+    long BytesWritten { get; }
 
     // When a buffer is created, CloseAtSize and CloseAtAge are set to
     // BufferedWriterOptions.CloseBuffer.Size and BufferedWriterOptions.Age respectively.
@@ -37,17 +42,17 @@ namespace ChunkIO {
     //
     // An implication of this is that the buffer won't get closed if the second condition
     // becomes true while the buffer is locked as long as it reverts to false before unlocking.
-    public long? CloseAtSize { get; set; }
-    public TimeSpan? CloseAtAge { get; set; }
+    long? CloseAtSize { get; set; }
+    TimeSpan? CloseAtAge { get; set; }
 
-    public abstract void Abandon();
+    void Abandon();
 
     // Called exactly once from an arbitrary thread but never when the buffer
     // is locked. Can be called synchronously from OutputBuffer.Dispose(). After
     // the call the buffer gets asynchronously written to the underlying
     // ChunkWriter. Afterwards the buffer no longer gets used, so there is no
     // need to unsubscribe from the event.
-    public event Action OnClose;
+    event Action OnClose;
   }
 
   class Triggers {
@@ -90,6 +95,7 @@ namespace ChunkIO {
   sealed class BufferedWriter : IDisposable {
     readonly BufferedWriterOptions _opt;
     readonly ChunkWriter _writer;
+    ISlot _slot = null;
 
     public BufferedWriter(string fname) : this(fname, new BufferedWriterOptions()) { }
 
@@ -100,18 +106,26 @@ namespace ChunkIO {
       _writer = new ChunkWriter(fname);
     }
 
-    public string Name => throw new NotImplementedException();
+    public string Name => _writer.Name;
 
-    // Requires: There is no current buffer.
-    //
     // Returns the newly created locked buffer. Never null.
-    public OutputBuffer NewBuffer() {
-      throw new NotImplementedException();
+    //
+    // Requires: There is no current buffer.
+    public IOutputBuffer NewBuffer() {
+      var buf = new Buffer(this);
+      ISlot prev = Interlocked.Exchange(ref _slot, buf);
+      if (prev is null || prev is Waiter) return buf;
+      // If this happens, no recovery is possible. The process has to be killed.
+      System.Diagnostics.Debugger.Launch();
+      throw new InvalidOperationException("NewBuffer() precondition violation. Now BufferedWriter is broken.");
     }
 
     // Returns the locked current buffer or null if there is no current buffer.
-    public OutputBuffer GetBuffer() {
-      throw new NotImplementedException();
+    public IOutputBuffer GetBuffer() {
+      ISlot slot = Interlocked.Exchange(ref _slot, Locked.Instance);
+      if (slot is Buffer buf) return buf;
+      Unlock();
+      return null;
     }
 
     // If there is current buffer, waits until it gets unlocked and writes its content to
@@ -130,82 +144,90 @@ namespace ChunkIO {
       throw new NotImplementedException();
     }
 
-    class Buffer : OutputBuffer {
+    void Unlock() {
+
+    }
+
+    interface ISlot { }
+
+    sealed class Locked : ISlot {
+      public static Locked Instance { get; } = new Locked();
+    }
+
+    sealed class Waiter : ISlot {
+      public Waiter(Action action) { Action = action; }
+      public Action Action { get; }
+    }
+
+    sealed class Buffer : IOutputBuffer, ISlot {
       readonly BufferedWriter _writer;
-      readonly MemoryStream _output;
-      readonly DeflateStream _deflate;
-      long _written = 0;
+      readonly Compressor _compressor;
 
       public Buffer(BufferedWriter writer) {
         _writer = writer;
-        _output = new MemoryStream(16 << 10);
-        _deflate = new DeflateStream(_output, writer._opt.CompressionLevel, leaveOpen: true);
+        _compressor = new Compressor(writer._opt.CompressionLevel);
+        CloseAtSize = writer._opt.CloseBuffer?.Size;
+        CloseAtAge = writer._opt.CloseBuffer?.Age;
       }
 
-      public override bool CanWrite => true;
-      public override bool CanRead => false;
-      public override bool CanSeek => false;
-      public override bool CanTimeout => false;
-      public override long BytesWritten => _written;
+      public Stream Stream => _compressor;
+      public DateTime CreatedAt { get; } = DateTime.UtcNow;
+      public UserData UserData { get; set; }
+      public object UserState { get; set; }
+      public long BytesWritten => _compressor.BytesWritten;
 
-      // TODO: This may not work. Stream might block multiple Dispose() calls.
-      protected override void Dispose(bool disposing) => throw new NotImplementedException();
+      public long? CloseAtSize { get; set; }
+      public TimeSpan? CloseAtAge { get; set; }
 
-      public override void Abandon() => throw new NotImplementedException();
+      public event Action OnClose;
 
-      public override void Close() => throw new NotImplementedException();
-
-      public override void Write(byte[] buffer, int offset, int count) {
-        _deflate.Write(buffer, offset, count);
-        _written += count;
+      public void Abandon() {
+        throw new NotImplementedException();
       }
 
-      public override void WriteByte(byte value) {
-        _deflate.WriteByte(value);
-        ++_written;
+      public void Dispose() {
+        throw new NotImplementedException();
       }
+    }
 
-      public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) {
-        await _deflate.WriteAsync(buffer, offset, count, cancellationToken);
-        _written += count;
-      }
+    sealed class Compressor : DeflateStream {
+      public Compressor(CompressionLevel lvl) : base(new MemoryStream(16 << 10), lvl) { }
 
-      public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count,
-                                              AsyncCallback callback, object state) {
-        return new AsyncResult(_deflate.BeginWrite(buffer, offset, count, callback, state), count);
-      }
+      public long BytesWritten { get; internal set; }
 
-      public override void EndWrite(IAsyncResult asyncResult) {
-        _deflate.EndWrite(asyncResult);
-        _written += ((AsyncResult)asyncResult).Count;
+      public ArraySegment<byte> GetCompressed() {
+        base.Flush();
+        var strm = (MemoryStream)BaseStream;
+        return new ArraySegment<byte>(strm.GetBuffer(), 0, (int)strm.Length);
       }
 
       public override void Flush() { }
       public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-      public override long Length => throw new NotSupportedException();
-      public override int ReadTimeout => throw new NotSupportedException();
-      public override int WriteTimeout => throw new NotSupportedException();
-      public override long Position {
-        get => throw new NotSupportedException();
-        set => throw new NotSupportedException();
+      public override void Write(byte[] buffer, int offset, int count) {
+        base.Write(buffer, offset, count);
+        BytesWritten += count;
       }
 
-      public override void SetLength(long value) => throw new NotSupportedException();
-      public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-      public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-      public override int EndRead(IAsyncResult asyncResult) => throw new NotSupportedException();
-      public override int ReadByte() => throw new NotSupportedException();
-      
-      public override IAsyncResult BeginRead(byte[] buffer, int offset, int count,
-                                             AsyncCallback callback, object state) {
-         throw new NotSupportedException();
+      public override void WriteByte(byte value) {
+        base.WriteByte(value);
+        ++BytesWritten;
       }
-      public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken) {
-         throw new NotSupportedException();
+
+      public override async Task WriteAsync(byte[] buffer, int offset, int count,
+                                            CancellationToken cancellationToken) {
+        await base.WriteAsync(buffer, offset, count, cancellationToken);
+        BytesWritten += count;
       }
-      public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) {
-         throw new NotSupportedException();
+
+      public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count,
+                                              AsyncCallback callback, object state) {
+        return new AsyncResult(base.BeginWrite(buffer, offset, count, callback, state), count);
+      }
+
+      public override void EndWrite(IAsyncResult asyncResult) {
+        base.EndWrite(asyncResult);
+        BytesWritten += ((AsyncResult)asyncResult).Count;
       }
 
       class AsyncResult : IAsyncResult {
