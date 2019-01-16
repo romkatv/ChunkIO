@@ -20,7 +20,11 @@ namespace ChunkIO {
   abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>> {
     BinaryWriter _writer = null;
 
-    public void Dispose() => _writer?.Dispose();
+    public void Dispose() => Dispose(true);
+
+    protected virtual void Dispose(bool disposing) {
+      if (disposing) _writer?.Dispose();
+    }
 
     public DateTime EncodePrimary(Stream strm, Tick<T> tick) {
       RefreshWriter(strm);
@@ -46,7 +50,11 @@ namespace ChunkIO {
   abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>> {
     BinaryReader _reader = null;
 
-    public void Dispose() => _reader?.Dispose();
+    public void Dispose() => Dispose(true);
+
+    protected virtual void Dispose(bool disposing) {
+      if (disposing) _reader?.Dispose();
+    }
 
     public void DecodePrimary(Stream strm, DateTime t, out Tick<T> val) {
       RefreshReader(strm);

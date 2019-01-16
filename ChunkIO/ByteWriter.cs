@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  class ByteWriter : IDisposable {
+  sealed class ByteWriter : IDisposable {
     readonly FileStream _file;
 
     public ByteWriter(string fname) {

@@ -80,11 +80,15 @@ namespace ChunkIO {
 
     // Can block on IO and throw. Won't do either of these if you call FlushAsync() beforehand and
     // wait for its successful completion.
-    public void Dispose() {
-      try {
-        Encoder.Dispose();
-      } finally {
-        _writer.Dispose();
+    public void Dispose() => Dispose(true);
+
+    protected virtual void Dispose(bool disposing) {
+      if (disposing) {
+        try {
+          Encoder.Dispose();
+        } finally {
+          _writer.Dispose();
+        }
       }
     }
   }
@@ -114,7 +118,11 @@ namespace ChunkIO {
       return new AsyncEnumerable<IEnumerable<T>>(async yield => {
         InputBuffer buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
         while (buf != null) {
-          await yield.ReturnAsync(DecodeBuffer(buf, Decoder));
+          try {
+            await yield.ReturnAsync(DecodeBuffer(buf, Decoder));
+          } finally {
+            buf.Dispose();
+          }
           buf = await _reader.ReadNextAsync();
         }
       });
@@ -126,11 +134,15 @@ namespace ChunkIO {
       while (decoder.DecodeSecondary(buf, out val)) yield return val;
     }
 
-    public void Dispose() {
-      try {
-        Decoder.Dispose();
-      } finally {
-        _reader.Dispose();
+    public void Dispose() => Dispose(true);
+
+    protected virtual void Dispose(bool disposing) {
+      if (disposing) {
+        try {
+          Decoder.Dispose();
+        } finally {
+          _reader.Dispose();
+        }
       }
     }
   }

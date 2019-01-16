@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  class ChunkWriter : IDisposable {
+  sealed class ChunkWriter : IDisposable {
     readonly ByteWriter _writer;
     readonly byte[] _header = new byte[ChunkHeader.Size];
     readonly byte[] _meter = new byte[Meter.Size];

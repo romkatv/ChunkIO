@@ -36,7 +36,7 @@ namespace ChunkIO {
     Task ReturnAsync(T val);
   }
 
-  class AsyncEnumerable<T> : IAsyncEnumerable<T> {
+  sealed class AsyncEnumerable<T> : IAsyncEnumerable<T> {
     readonly Func<IYield<T>, Task> _generator;
 
     public AsyncEnumerable(Func<IYield<T>, Task> generator) {
@@ -45,7 +45,7 @@ namespace ChunkIO {
 
     public IAsyncEnumerator<T> GetAsyncEnumerator() => new AsyncEnumerator(_generator);
 
-    class AsyncEnumerator : IAsyncEnumerator<T>, IYield<T> {
+    sealed class AsyncEnumerator : IAsyncEnumerator<T>, IYield<T> {
       readonly Func<IYield<T>, Task> _generator;
       Exception _exception = null;
       Task _produced = null;

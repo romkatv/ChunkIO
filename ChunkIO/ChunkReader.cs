@@ -17,7 +17,7 @@ namespace ChunkIO {
     Task<bool> ReadContentAsync(byte[] array, int offset);
   }
 
-  class ChunkReader : IDisposable {
+  sealed class ChunkReader : IDisposable {
     readonly ByteReader _reader;
     readonly byte[] _meter = new byte[Meter.Size];
     readonly byte[] _header = new byte[ChunkHeader.Size];
@@ -131,7 +131,7 @@ namespace ChunkIO {
       return true;
     }
 
-    class Chunk : IChunk {
+    sealed class Chunk : IChunk {
       readonly ChunkReader _reader;
       readonly ChunkHeader _header;
 

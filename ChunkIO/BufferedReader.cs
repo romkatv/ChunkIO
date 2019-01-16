@@ -15,7 +15,7 @@ namespace ChunkIO {
     public UserData UserData { get; }
   }
 
-  class BufferedReader : IDisposable {
+  sealed class BufferedReader : IDisposable {
     readonly ChunkReader _reader;
     long _last = 0;
 
@@ -89,7 +89,7 @@ namespace ChunkIO {
       }
     }
 
-    class Buffer : InputBuffer {
+    sealed class Buffer : InputBuffer {
       readonly MemoryStream _strm;
 
       public Buffer(MemoryStream strm, UserData userData) : base(userData) {
@@ -121,10 +121,14 @@ namespace ChunkIO {
         }
       }
 
-      // There is an override for every public virtual/abstract method. These four are the only overrides
-      // that don't simply delegate to the underlying stream.
-      public override void Flush() { }
+      // There is an override for every public virtual/abstract method. Overrides in this group
+      // don't simply delegate to the underlying stream.
       public override bool CanWrite => false;
+      public override void Flush() { }
+      protected override void Dispose(bool disposing) {
+        if (disposing) _strm.Dispose();
+        base.Dispose(disposing);
+      }
       public override void SetLength(long value) => throw new NotSupportedException();
       public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
