@@ -30,40 +30,45 @@ namespace ChunkIO {
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 
-    // Negative position is allowed.
-    public async Task<IChunk> ReadBeforeAsync(long position) {
-      if (position < 0) return null;
-      for (long m = MeterBefore(Math.Min(position, _reader.Length)); m >= 0; m -= MeterInterval) { 
+    // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
+    // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
+    public async Task<IChunk> ReadLastAsync(long from, long to) {
+      if (to <= 0) return null;
+      for (long m = MeterBefore(Math.Min(to - 1, _reader.Length)); m >= 0 && from < to; m -= MeterInterval) {
+        Debug.Assert(m < to);
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
+        Debug.Assert(MeterBefore(meter.Value.ChunkBeginPosition) <= m);
         m = MeterBefore(meter.Value.ChunkBeginPosition);
-        position = meter.Value.ChunkBeginPosition - 1;
+        to = meter.Value.ChunkBeginPosition;
       }
       return null;
 
       async Task<IChunk> Scan(long h) {
         ChunkHeader? res = null;
         while (true) {
+          Debug.Assert(h < to);
           ChunkHeader? header = await ReadChunkHeader(h);
           if (!header.HasValue) break;
-          res = header;
+          if (h >= from) res = header;
           long next = header.Value.EndPosition(h).Value;
-          if (next > position) break;
+          if (next >= to) break;
           h = next;
         }
         return res.HasValue ? new Chunk(this, h, res.Value) : null;
       }
     }
 
-    // Negative position is allowed.
-    public async Task<IChunk> ReadAfterAsync(long position) {
-      if (position == _last) {
-        IChunk res = await Scan(position);
+    // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
+    // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
+    public async Task<IChunk> ReadFirstAsync(long from, long to) {
+      if (from == _last) {
+        IChunk res = await Scan(from);
         if (res != null) return res;
       }
-      for (long m = MeterBefore(Math.Max(0, position)); m < _reader.Length; m += MeterInterval) {
+      for (long m = MeterBefore(Math.Max(0, from)); m < Math.Min(_reader.Length, to); m += MeterInterval) {
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
@@ -72,16 +77,17 @@ namespace ChunkIO {
       return null;
 
       async Task<IChunk> Scan(long h) {
-        while (true) {
+        while (h < to) {
           ChunkHeader? header = await ReadChunkHeader(h);
           if (!header.HasValue) return null;
           long next = header.Value.EndPosition(h).Value;
-          if (h >= position) {
+          if (h >= from) {
             _last = next;
             return new Chunk(this, h, header.Value);
           }
           h = next;
         }
+        return null;
       }
     }
 
