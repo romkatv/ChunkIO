@@ -23,14 +23,14 @@ namespace ChunkIO {
 
     public static long? MeteredPosition(long begin, long offset) {
       if (!IsValidPosition(begin)) return null;
-      if (offset - MaxContentLength - ChunkHeader.Size > 0) return null;
+      if (offset < 0 || offset - MaxContentLength - ChunkHeader.Size > 0) return null;
       long p = begin % MeterInterval;
       long n = offset / (MeterInterval - Meter.Size);
       long m = offset % (MeterInterval - Meter.Size);
       if (p == 0 && m > 0 || p + m > MeterInterval) ++n;
       ulong res = (ulong)begin + (ulong)offset + (ulong)n * Meter.Size;
       if (res > MaxPosition) return null;
-      Debug.Assert(IsValidPosition((long)res));
+      Debug.Assert(IsValidPosition(res));
       return (long)res;
     }
 
