@@ -59,7 +59,7 @@ namespace ChunkIO {
       public T Current { get; internal set; }
 
       public async Task<bool> MoveNextAsync(CancellationToken cancel) {
-        if (_produced is null) {
+        if (_produced == null) {
           _produced = new Task(delegate { });
           Task _ = _generator.Invoke(this).ContinueWith(t => {
             if (t.IsFaulted) _exception = t.Exception;

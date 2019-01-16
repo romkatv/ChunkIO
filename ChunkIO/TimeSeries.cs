@@ -20,8 +20,8 @@ namespace ChunkIO {
     readonly BufferedWriter _writer;
 
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder) {
-      if (fname is null) throw new ArgumentNullException(nameof(fname));
-      if (encoder is null) throw new ArgumentNullException(nameof(encoder));
+      if (fname == null) throw new ArgumentNullException(nameof(fname));
+      if (encoder == null) throw new ArgumentNullException(nameof(encoder));
 
       // Guarantees:
       //
@@ -93,7 +93,7 @@ namespace ChunkIO {
     readonly BufferedReader _reader;
 
     public TimeSeriesReader(string fname, ITimeSeriesDecoder<T> decoder) {
-      if (decoder is null) throw new ArgumentNullException(nameof(decoder));
+      if (decoder == null) throw new ArgumentNullException(nameof(decoder));
       _reader = new BufferedReader(fname);
       Decoder = decoder;
     }
