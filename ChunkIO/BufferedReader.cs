@@ -74,19 +74,19 @@ namespace ChunkIO {
         input.Seek(0, SeekOrigin.Begin);
         using (var deflate = new DeflateStream(input, CompressionMode.Decompress, leaveOpen: true)) {
           var output = new MemoryStream(4 * chunk.ContentLength);
+          var block = new byte[1024];
           try {
-            var block = new byte[1024];
             while (true) {
               int n = deflate.Read(block, 0, block.Length);
               if (n <= 0) break;
               output.Write(block, 0, n);
             }
-            output.Seek(0, SeekOrigin.Begin);
-            return new Buffer(output, chunk.UserData);
           } catch {
             output.Dispose();
-            throw;
+            return null;
           }
+          output.Seek(0, SeekOrigin.Begin);
+          return new Buffer(output, chunk.UserData);
         }
       }
     }
