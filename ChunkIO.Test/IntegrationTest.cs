@@ -49,7 +49,7 @@ namespace ChunkIO.Test {
           for (int i = 0; i != 2; ++i) {
             var t = new DateTime(i);
             var trade = new Trade(price: 10 * i, size: 100 * i);
-            writer.Write(new Tick<Trade>(t, trade));
+            writer.Write(new Tick<Trade>(t, trade)).Wait();
           }
           using (var reader = new TradeReader(fname)) {
             reader.FlushRemoteWriterAsync().Wait();
@@ -156,7 +156,7 @@ namespace ChunkIO.Test {
           for (int i = 0; i != 2; ++i) {
             var t = new DateTime(i);
             var lvl = new PriceLevel(price: 10 * i, size: 100 * i);
-            writer.Write(new Tick<PriceLevel[]>(t, new[] { lvl }));
+            writer.Write(new Tick<PriceLevel[]>(t, new[] { lvl })).Wait();
           }
           using (var reader = new OrderBookReader(fname)) {
             reader.FlushRemoteWriterAsync().Wait();

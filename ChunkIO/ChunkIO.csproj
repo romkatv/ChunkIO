@@ -43,6 +43,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AsyncDisposable.cs" />
     <Compile Include="AsyncEnumerable.cs" />
     <Compile Include="BufferedReader.cs" />
     <Compile Include="Chunk.cs" />

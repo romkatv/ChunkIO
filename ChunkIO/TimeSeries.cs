@@ -49,30 +49,29 @@ namespace ChunkIO {
     public ITimeSeriesEncoder<T> Encoder { get; }
 
     // Doesn't block on IO.
-    public void Write(T val) {
-      using (IOutputBuffer buf = _writer.GetBuffer()) {
-        if (buf != null) {
-          try {
-            Encoder.EncodeSecondary(buf.Stream, val);
-          } catch {
-            buf.Abandon();
-            throw;
-          }
-          return;
-        }
+    public async Task Write(T val) {
+      bool primary = false;
+      IOutputBuffer buf = await _writer.GetBuffer();
+      if (buf == null) {
+        primary = true;
+        buf = await _writer.NewBuffer();
       }
-      using (IOutputBuffer buf = _writer.NewBuffer()) {
-        try {
+      try {
+        if (primary) {
           buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
           // If the block is set up to automatically close after a certain number of bytes is
           // written, tell it to exclude snapshot bytes from the calculation. This is necessary
           // to avoid creating a new block on every call to Write() if snapshots happen to
           // be large.
           if (buf.CloseAtSize.HasValue) buf.CloseAtSize += buf.BytesWritten;
-        } catch {
-          buf.Abandon();
-          throw;
+        } else {
+          Encoder.EncodeSecondary(buf.Stream, val);
         }
+      } catch {
+        buf.Abandon();
+        throw;
+      } finally {
+        await buf.DisposeAsync();
       }
     }
 
