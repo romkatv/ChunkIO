@@ -138,7 +138,7 @@ namespace ChunkIO {
       await _sem.WaitAsync();
       if (_buf != null) return new LockedBuffer(_buf, isNew: false);
       _buf = new Buffer(this);
-      _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
+      await _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
        return new LockedBuffer(_buf, isNew: true);
     }
 
@@ -166,9 +166,9 @@ namespace ChunkIO {
             try {
               await DoCloseBuffer(flushToDisk: false);
             } finally {
-              _closeBuffer.Stop();
-              _flushToOS.Stop();
-              _flushToDisk.Stop();
+              await _closeBuffer.Stop();
+              await _flushToOS.Stop();
+              await _flushToDisk.Stop();
               _writer.Dispose();
             }
           }).Wait();
@@ -183,19 +183,18 @@ namespace ChunkIO {
       if (_buf != null) {
         if (!_buf.IsAbandoned) _buf.FireOnClose();
         if (!_buf.IsAbandoned) {
-          _buf.FireOnClose();
           ArraySegment<byte> content = _buf.Compressor.GetCompressedData();
           await _writer.WriteAsync(_buf.UserData, content.Array, content.Offset, content.Count);
           if (_bufDisk == null && _opt.FlushToDisk?.Age != null) {
-            _flushToDisk.RunAt(DateTime.UtcNow + _opt.FlushToDisk.Age.Value);
+            await _flushToDisk.RunAt(DateTime.UtcNow + _opt.FlushToDisk.Age.Value);
           }
           if (_bufOS == null && _opt.FlushToOS?.Age != null) {
-            _flushToOS.RunAt(DateTime.UtcNow + _opt.FlushToOS.Age.Value);
+            await _flushToOS.RunAt(DateTime.UtcNow + _opt.FlushToOS.Age.Value);
           }
           _bufOS = (_bufOS ?? 0) + _buf.BytesWritten;
           _bufDisk = (_bufDisk ?? 0) + _buf.BytesWritten;
         }
-        _closeBuffer.Stop();
+        await _closeBuffer.Stop();
         _buf.Dispose();
         _buf = null;
       }
@@ -212,10 +211,10 @@ namespace ChunkIO {
       if (_bufDisk == null || !flushToDisk && _bufOS == null) return;
       await _writer.FlushAsync(flushToDisk);
       _bufOS = null;
-      _flushToOS.Stop();
+      await _flushToOS.Stop();
       if (flushToDisk) {
         _bufDisk = null;
-        _flushToDisk.Stop();
+        await _flushToDisk.Stop();
       }
     }
 
@@ -224,7 +223,7 @@ namespace ChunkIO {
         if (_buf.BytesWritten >= _buf.CloseAtSize || _buf.IsAbandoned) {
           await DoCloseBuffer(flushToDisk: null);
         } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeBuffer.Time) {
-          _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge);
+          await _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge);
         }
       } finally {
         _sem.Release();
@@ -310,6 +309,7 @@ namespace ChunkIO {
       public long BytesWritten { get; internal set; }
 
       public ArraySegment<byte> GetCompressedData() {
+        // TODO: The only way to get compressed data is to Dispose() first.
         base.Flush();
         var strm = (MemoryStream)BaseStream;
         return new ArraySegment<byte>(strm.GetBuffer(), 0, (int)strm.Length);
@@ -398,20 +398,21 @@ namespace ChunkIO {
 
     public DateTime? Time { get; internal set; }
 
-    public void Stop() {
+    public async Task Stop() {
       Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (Time == null));
       if (_task == null) return;
 
-      CancellationTokenSource cancel = _cancel;
-      cancel.Cancel();
-      _task.ContinueWith(_ => cancel.Dispose());
+      _cancel.Cancel();
+      try { await _task; } catch { }
+      _cancel.Dispose();
       _task = null;
       _cancel = null;
       Time = null;
     }
 
-    public void RunAt(DateTime? t) {
-      Stop();
+    // The returned task completes when the action is scheduled, which happens almost immediately.
+    public async Task RunAt(DateTime? t) {
+      await Stop();
       if (t.HasValue) {
         Time = t;
         _cancel = new CancellationTokenSource();
@@ -419,7 +420,7 @@ namespace ChunkIO {
       }
     }
 
-    public void Dispose() => Stop();
+    public void Dispose() => Stop().Wait();
 
     async Task Run() {
       CancellationToken token = _cancel.Token;
@@ -428,7 +429,16 @@ namespace ChunkIO {
       } catch (TaskCanceledException) {
         return;
       }
-      await _sem.WithLock(() => token.IsCancellationRequested ? Task.CompletedTask : _action.Invoke());
+      try {
+        await _sem.WaitAsync(token);
+      } catch (TaskCanceledException) {
+        return;
+      }
+      try {
+        await _action.Invoke();
+      } finally {
+        _sem.Release();
+      }
     }
 
     static async Task Delay(DateTime t, CancellationToken cancel) {
