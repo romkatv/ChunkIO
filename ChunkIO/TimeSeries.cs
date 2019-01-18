@@ -50,14 +50,9 @@ namespace ChunkIO {
 
     // Doesn't block on IO.
     public async Task Write(T val) {
-      bool primary = false;
-      IOutputBuffer buf = await _writer.GetBuffer();
-      if (buf == null) {
-        primary = true;
-        buf = await _writer.NewBuffer();
-      }
+      IOutputBuffer buf = await _writer.LockBuffer();
       try {
-        if (primary) {
+        if (buf.IsNew) {
           buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
           // If the block is set up to automatically close after a certain number of bytes is
           // written, tell it to exclude snapshot bytes from the calculation. This is necessary

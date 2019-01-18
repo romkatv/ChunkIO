@@ -9,16 +9,17 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  // It's illegal to call any method of OutputBuffer when it isn't locked. Locked instances are returned
-  // by BufferedWriter.NewBuffer() and BufferedWriter.GetBuffer(). They must be unlocked with
-  // OutputBuffer.DisposeAsync().
+  // It's illegal to call any method of OutputBuffer or its Stream when the buffer isn't locked.
+  // Locked buffers are returned by BufferedWriter.LockBuffer(). They must be unlocked with
+  // OutputBuffer.DisposeAsync() or OutputBuffer.Dispose().
   //
-  // Writes to the buffer cannot block on IO but DisposeAsync() can.
-  interface IOutputBuffer : IAsyncDisposable {
+  // Writes to the buffer do not block on IO but DisposeAsync() and Dispose() potentially do.
+  interface IOutputBuffer : IDisposable, IAsyncDisposable {
     // Called right before the buffer is closed unless it was abandoned. Afterwards the buffer no
-    // longer gets used, so there is no need to unsubscribe from the event. Can be called either
-    // synchronously from DisposeAsync() or from another thread at any time. The buffer is considered
-    // locked when the event fires.
+    // longer gets used, so there is no need to unsubscribe from the event. Can fire either
+    // synchronously from DisposeAsync() or Dispose(), or from another thread at any time. The buffer is
+    // considered locked when the event fires, hence it's legal to write to it. If Abandon() is
+    // called from OnClose, the buffer is dropped on the floor.
     event Action OnClose;
 
     // Append-only. Neither readable nor seakable. Flush() and FlushAsync() have no effect.
@@ -26,13 +27,19 @@ namespace ChunkIO {
     // The user MUST NOT Dispose() or Close() the stream.
     Stream Stream { get; }
 
+    bool IsNew { get; }
+    // Time when this buffer was created.
     DateTime CreatedAt { get; }
+    // User data of the chunk. Passed through to the underlying ChunkWriter. Set to default(UserData)
+    // in new chunks.
     UserData UserData { get; set; }
+    // Placeholder for anything the user might need to store alongside the buffer. Set to null in
+    // new chunks.
     object UserState { get; set; }
 
     // How many bytes have been written to the buffer via its Stream methods.
-    // The meaning of BytesWritten is the same as Length, except that Length isn't available in
-    // OutputBuffer because it's not seakable.
+    // The meaning of BytesWritten is the same as Stream.Length, except that Length isn't available in
+    // IOutputBuffer.Stream because it's not seakable.
     long BytesWritten { get; }
 
     // When a buffer is created, CloseAtSize and CloseAtAge are set to
@@ -48,9 +55,12 @@ namespace ChunkIO {
     long? CloseAtSize { get; set; }
     TimeSpan? CloseAtAge { get; set; }
 
-    // Drops the buffer. OnClose won't get called and the buffer won't be written to disk.
-    // You must still unlock the buffer with DisposeAsync() after calling Abandon().
-    // The next call to GetBuffer() will return null.
+    // Drops the buffer without writing it to disk. The user must still unlock the buffer with
+    // DisposeAsync() or Dispose() after calling Abandon(). The next call to BufferedWriter.LockBuffer()
+    // will create a new buffer.
+    //
+    // It's legal to call Abandon() from OnClose. If called before OnClose is fired, the latter
+    // won't fire.
     void Abandon();
   }
 
@@ -117,23 +127,16 @@ namespace ChunkIO {
 
     public string Name => _writer.Name;
 
-    // Returns the newly created locked buffer. Never null.
-    //
-    // Requires: There is no current buffer.
-    public async Task<IOutputBuffer> NewBuffer() {
+    // If there is a current buffer, locks and returns it. IOutputBuffer.IsNew is false.
+    // Otherwise creates a new buffer, locks and returns it. IOutputBuffer.IsNew is true.
+    public async Task<IOutputBuffer> LockBuffer() {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
       return await _sem.WithLock(() => {
-        if (_buf != null) throw new Exception("Close the current buffer before creating a new one");
+        if (_buf != null) return Task.FromResult(new LockedBuffer(_buf, isNew: false));
         _buf = new Buffer(this);
         _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
-        return Task.FromResult(_buf);
+       return Task.FromResult(new LockedBuffer(_buf, isNew: true));
       });
-    }
-
-    // Returns the locked current buffer or null if there is no current buffer.
-    public async Task<IOutputBuffer> GetBuffer() {
-      if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      return await _sem.WithLock(() => Task.FromResult(_buf));
     }
 
     // If there is current buffer, waits until it gets unlocked and writes its content to
@@ -171,9 +174,10 @@ namespace ChunkIO {
 
     async Task DoCloseBuffer(bool? flushToDisk) {
       if (_buf != null) {
+        if (!_buf.IsAbandoned) _buf.FireOnClose();
         if (!_buf.IsAbandoned) {
           _buf.FireOnClose();
-          ArraySegment<byte> content = _buf.Compressor.GetCompressed();
+          ArraySegment<byte> content = _buf.Compressor.GetCompressedData();
           await _writer.WriteAsync(_buf.UserData, content.Array, content.Offset, content.Count);
           if (_bufDisk == null && _opt.FlushToDisk?.Age != null) {
             _flushToDisk.RunAt(DateTime.UtcNow + _opt.FlushToDisk.Age.Value);
@@ -220,7 +224,52 @@ namespace ChunkIO {
       }
     }
 
-    sealed class Buffer : IOutputBuffer, IDisposable {
+    sealed class LockedBuffer : IOutputBuffer {
+      readonly Buffer _buf;
+      bool _locked = true;
+
+      public LockedBuffer(Buffer buf, bool isNew) {
+        _buf = buf;
+        IsNew = isNew;
+      }
+
+      public event Action OnClose {
+        add { _buf.OnClose += value; }
+        remove { _buf.OnClose -= value; }
+      }
+
+      public bool IsNew { get; }
+      public Stream Stream => _buf.Stream;
+      public DateTime CreatedAt => _buf.CreatedAt;
+      public long BytesWritten => _buf.BytesWritten;
+
+      public UserData UserData {
+        get => _buf.UserData;
+        set { _buf.UserData = value; }
+      }
+      public object UserState {
+        get => _buf.UserState;
+        set { _buf.UserState = value; }
+      }
+      public long? CloseAtSize {
+        get => _buf.CloseAtSize;
+        set { _buf.CloseAtSize = value; }
+      }
+      public TimeSpan? CloseAtAge {
+        get => _buf.CloseAtAge;
+        set { _buf.CloseAtAge = value; }
+      }
+
+      public void Abandon() { _buf.Abandon(); }
+      public void Dispose() => DisposeAsync().Wait();
+      public Task DisposeAsync() {
+        if (!_locked) return Task.CompletedTask;
+        _locked = false;
+        return _buf.Unlock();
+      }
+    }
+
+    sealed class Buffer : IDisposable {
       readonly BufferedWriter _writer;
 
       public Buffer(BufferedWriter writer) {
@@ -232,8 +281,6 @@ namespace ChunkIO {
 
       public event Action OnClose;
 
-      public bool IsAbandoned { get; internal set; }
-      public Compressor Compressor { get; }
       public Stream Stream => Compressor;
       public DateTime CreatedAt { get; } = DateTime.UtcNow;
       public long BytesWritten => Compressor.BytesWritten;
@@ -241,11 +288,13 @@ namespace ChunkIO {
       public object UserState { get; set; }
       public long? CloseAtSize { get; set; }
       public TimeSpan? CloseAtAge { get; set; }
-
-      public void FireOnClose() { OnClose?.Invoke(); }
       public void Abandon() { IsAbandoned = true; }
       public void Dispose() => Compressor.Dispose();
-      public Task DisposeAsync() => _writer.Unlock();
+
+      public bool IsAbandoned { get; internal set; }
+      public Compressor Compressor { get; }
+      public void FireOnClose() { OnClose?.Invoke(); }
+      public Task Unlock() => _writer.Unlock();
     }
 
     sealed class Compressor : DeflateStream {
@@ -253,7 +302,7 @@ namespace ChunkIO {
 
       public long BytesWritten { get; internal set; }
 
-      public ArraySegment<byte> GetCompressed() {
+      public ArraySegment<byte> GetCompressedData() {
         base.Flush();
         var strm = (MemoryStream)BaseStream;
         return new ArraySegment<byte>(strm.GetBuffer(), 0, (int)strm.Length);
