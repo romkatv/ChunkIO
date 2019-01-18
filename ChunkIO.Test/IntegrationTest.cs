@@ -52,7 +52,7 @@ namespace ChunkIO.Test {
             writer.Write(new Tick<Trade>(t, trade)).Wait();
           }
           using (var reader = new TradeReader(fname)) {
-            reader.FlushRemoteWriterAsync().Wait();
+            reader.FlushRemoteWriterAsync(flushToDisk: false).Wait();
             // Production code should probably avoid materializing all data like we do here.
             // Instead, it should either iterate over the result of Sync() or -- even better --
             // use ForEachAsync() instead of Sync().
@@ -159,7 +159,7 @@ namespace ChunkIO.Test {
             writer.Write(new Tick<PriceLevel[]>(t, new[] { lvl })).Wait();
           }
           using (var reader = new OrderBookReader(fname)) {
-            reader.FlushRemoteWriterAsync().Wait();
+            reader.FlushRemoteWriterAsync(flushToDisk: false).Wait();
             Tick<OrderBookUpdate>[][] chunks = reader.ReadAllAfter(new DateTime(0))
                 .Sync()
                 .Select(c => c.ToArray())

@@ -57,9 +57,7 @@ namespace ChunkIO {
     public async Task<InputBuffer> ReadNextAsync() =>
       await MakeBuffer(await _reader.ReadFirstAsync(_last, long.MaxValue), Scan.Forward);
 
-    public Task FlushRemoteWriterAsync() {
-      throw new NotImplementedException();
-    }
+    public Task FlushRemoteWriterAsync(bool flushToDisk) => RemoteFlush.FlushAsync(Name, flushToDisk);
 
     public void Dispose() => _reader.Dispose();
 

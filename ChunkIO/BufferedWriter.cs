@@ -105,6 +105,7 @@ namespace ChunkIO {
     readonly SemaphoreSlim _sem = new SemaphoreSlim(1, 1);
     readonly BufferedWriterOptions _opt;
     readonly ChunkWriter _writer;
+    readonly IDisposable _listener;
     readonly Timer _closeBuffer;
     readonly Timer _flushToOS;
     readonly Timer _flushToDisk;
@@ -123,6 +124,9 @@ namespace ChunkIO {
       _closeBuffer = new Timer(_sem, () => DoCloseBuffer(flushToDisk: null));
       _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false));
       _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true));
+      if (opt.AllowRemoteFlush) {
+        _listener = RemoteFlush.CreateListener(fname, FlushAsync);
+      }
     }
 
     public string Name => _writer.Name;
@@ -156,19 +160,23 @@ namespace ChunkIO {
     public void Dispose() {
       if (_disposed) return;
       try {
-        _sem.WithLock(async () => {
-          try {
-            await DoCloseBuffer(flushToDisk: false);
-          } finally {
-            _closeBuffer.Stop();
-            _flushToOS.Stop();
-            _flushToDisk.Stop();
-            _writer.Dispose();
-          }
-        }).Wait();
+        _listener?.Dispose();
       } finally {
-        _sem.Dispose();
-        _disposed = true;
+        try {
+          _sem.WithLock(async () => {
+            try {
+              await DoCloseBuffer(flushToDisk: false);
+            } finally {
+              _closeBuffer.Stop();
+              _flushToOS.Stop();
+              _flushToDisk.Stop();
+              _writer.Dispose();
+            }
+          }).Wait();
+        } finally {
+          _sem.Dispose();
+          _disposed = true;
+        }
       }
     }
 
