@@ -102,7 +102,7 @@ namespace ChunkIO {
     // Works even if the writer is in another process, but not when it's on another machine.
     //
     // This method can be called concurrently with any other method and with itself.
-    public Task FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
+    public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
 
     // Reads time series data from the file and returns it one buffer at a time. Each IEnumerable<T>
     // corresponds to a single buffer, the first element being "primary" and the rest "secondary".

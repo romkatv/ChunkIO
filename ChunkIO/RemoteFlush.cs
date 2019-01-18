@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
@@ -21,6 +22,10 @@ namespace ChunkIO {
       while (true) {
         using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
                                                     PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
+          // NamedPipeClientStream has awful API. It doesn't allow us to bail early if there is no pipe and
+          // to wait indefinitely if there is. So we do it manually with a file existence check and a loop.
+          // Unfortunately, this existence check has a side effect of creating a client pipe connection.
+          // This is why our server has to handle connections that don't write any data.
           if (!File.Exists(@"\\.\pipe\" + PipeNameFromFile(fname))) return false;
           try {
             await pipe.ConnectAsync(1000);
@@ -67,9 +72,10 @@ namespace ChunkIO {
       bool _disposed = false;
 
       public Listener(string fname, Func<bool, Task> flush) {
-        _srv = RunPipeServer(PipeNameFromFile(fname), 2, _cancel.Token, async (Stream strm, CancellationToken c) => {
+        _srv = RunPipeServer(PipeNameFromFile(fname), 4, _cancel.Token, async (Stream strm, CancellationToken c) => {
           var buf = new byte[1];
-          if (await strm.ReadAsync(buf, 0, 1, c) != 1) throw new Exception("Empty Flush request");
+          // Comments in FlushAsync() explanation why there may be no data in the stream.
+          if (await strm.ReadAsync(buf, 0, 1, c) != 1) return;
           if (buf[0] != 0 && buf[0] != 1) throw new Exception("Invalid Flush request");
           bool flushToDisk = buf[0] == 1;
           try {
@@ -104,18 +110,23 @@ namespace ChunkIO {
         }
 
         var monitor = new object();
-        int listening = 0;
+        int free = 0;
         int active = 0;
         Task wake = null;
 
         try {
           while (true) {
+            int start;
             lock (monitor) {
-              while (listening < freeInstances && listening + active < MaxNamedPipeServerInstances) {
-                ++listening;
-                Task _ = RunServer();
-              }
+              Debug.Assert(free >= 0 && free <= freeInstances);
+              Debug.Assert(active >= 0 && free + active <= MaxNamedPipeServerInstances);
+              start = Math.Min(freeInstances - free, MaxNamedPipeServerInstances - free - active);
+              free += start;
               wake = new Task(delegate { }, cancel);
+            }
+            Debug.Assert(start >= 0);
+            while (start-- > 0) {
+              Task _ = RunServer();
             }
             await wake;
           }
@@ -123,7 +134,7 @@ namespace ChunkIO {
           if (!cancel.IsCancellationRequested) throw;
           while (true) {
             lock (monitor) {
-              if (listening == 0 && active == 0) break;
+              if (free == 0 && active == 0) break;
               wake = new Task(delegate { });
             }
             await wake;
@@ -133,12 +144,11 @@ namespace ChunkIO {
         void Update(Action update) {
           lock (monitor) {
             update.Invoke();
-            if (wake != null && wake.Status == TaskStatus.Created) wake.Start();
+            if (wake.Status == TaskStatus.Created) wake.Start();
           }
         }
 
         async Task RunServer() {
-          await Task.Yield();
           NamedPipeServerStream srv = null;
           bool connected = false;
           try {
@@ -153,7 +163,7 @@ namespace ChunkIO {
             await srv.WaitForConnectionAsync(cancel);
             connected = true;
             Update(() => {
-              --listening;
+              --free;
               ++active;
             });
             await handler.Invoke(srv, cancel);
@@ -168,7 +178,7 @@ namespace ChunkIO {
               if (connected) {
                 --active;
               } else {
-                --listening;
+                --free;
               }
             });
           }

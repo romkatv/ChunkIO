@@ -52,7 +52,7 @@ namespace ChunkIO.Test {
             writer.Write(new Tick<Trade>(t, trade)).Wait();
           }
           using (var reader = new TradeReader(fname)) {
-            reader.FlushRemoteWriterAsync(flushToDisk: false).Wait();
+            Assert.IsTrue(reader.FlushRemoteWriterAsync(flushToDisk: false).Result);
             // Production code should probably avoid materializing all data like we do here.
             // Instead, it should either iterate over the result of Sync() or -- even better --
             // use ForEachAsync() instead of Sync().

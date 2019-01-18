@@ -101,7 +101,7 @@ namespace ChunkIO {
       if (await _reader.ReadAsync(_meter, 0, _meter.Length) != _meter.Length) return null;
       var res = new Meter();
       if (!res.ReadFrom(_meter)) return null;
-      if (res.ChunkBeginPosition >= pos) return null;
+      if (res.ChunkBeginPosition > pos) return null;
       return res;
     }
 

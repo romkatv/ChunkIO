@@ -135,12 +135,11 @@ namespace ChunkIO {
     // Otherwise creates a new buffer, locks and returns it. IOutputBuffer.IsNew is true.
     public async Task<IOutputBuffer> LockBuffer() {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      return await _sem.WithLock(() => {
-        if (_buf != null) return Task.FromResult(new LockedBuffer(_buf, isNew: false));
-        _buf = new Buffer(this);
-        _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
-       return Task.FromResult(new LockedBuffer(_buf, isNew: true));
-      });
+      await _sem.WaitAsync();
+      if (_buf != null) return new LockedBuffer(_buf, isNew: false);
+      _buf = new Buffer(this);
+      _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
+       return new LockedBuffer(_buf, isNew: true);
     }
 
     // If there is current buffer, waits until it gets unlocked and writes its content to
@@ -365,7 +364,7 @@ namespace ChunkIO {
 
   static class SemaphoreSlimExtensions {
     public static async Task WithLock(this SemaphoreSlim sem, Func<Task> action) {
-      sem.Wait();
+      await sem.WaitAsync();
       try {
         await action.Invoke();
       } finally {
@@ -374,7 +373,7 @@ namespace ChunkIO {
     }
 
     public static async Task<T> WithLock<T>(this SemaphoreSlim sem, Func<Task<T>> action) {
-      sem.Wait();
+      await sem.WaitAsync();
       try {
         return await action.Invoke();
       } finally {
@@ -400,7 +399,7 @@ namespace ChunkIO {
     public DateTime? Time { get; internal set; }
 
     public void Stop() {
-      Debug.Assert((_task == null) == (_cancel == null) == (Time == null));
+      Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (Time == null));
       if (_task == null) return;
 
       CancellationTokenSource cancel = _cancel;
@@ -433,6 +432,7 @@ namespace ChunkIO {
     }
 
     static async Task Delay(DateTime t, CancellationToken cancel) {
+      await Task.Yield();
       while (true) {
         DateTime now = DateTime.UtcNow;
         if (t <= now) return;
