@@ -61,7 +61,7 @@ namespace ChunkIO {
     void Abandon();
   }
 
-  class Triggers {
+  public class Triggers {
     public long? Size { get; set; }
     public TimeSpan? Age { get; set; }
 
@@ -73,10 +73,10 @@ namespace ChunkIO {
     }
   }
 
-  class BufferedWriterOptions {
+  public class BufferedWriterOptions {
     public bool AllowRemoteFlush { get; set; } = true;
     public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
-    public Triggers CloseBuffer { get; set; } = new Triggers();
+    public Triggers CloseBuffer { get; set; } = new Triggers() { Size = 64 << 10 };
     public Triggers FlushToOS { get; set; } = new Triggers();
     public Triggers FlushToDisk { get; set; } = new Triggers();
 

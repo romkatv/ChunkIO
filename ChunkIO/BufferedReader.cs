@@ -39,7 +39,7 @@ namespace ChunkIO {
       IChunk left = await _reader.ReadFirstAsync(0, long.MaxValue);
       if (left == null || pred.Invoke(left.UserData)) return await MakeBuffer(left, Scan.Forward);
       IChunk right = await _reader.ReadLastAsync(left.EndPosition, long.MaxValue);
-      if (right == null) return await Decompress(left);
+      if (right == null) return await MakeBuffer(left, Scan.None);
       if (!pred.Invoke(right.UserData)) return await MakeBuffer(right, Scan.Backward);
       while (true) {
         IChunk mid = await ReadMiddle(left.EndPosition, right.BeginPosition);
@@ -69,6 +69,7 @@ namespace ChunkIO {
     }
 
     enum Scan {
+      None,
       Forward,
       Backward
     }
@@ -81,9 +82,19 @@ namespace ChunkIO {
           _last = chunk.EndPosition;
           return res;
         }
-        chunk = scan == Scan.Forward
-            ? await _reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue)
-            : await _reader.ReadLastAsync(0, chunk.BeginPosition);
+        switch (scan) {
+          case Scan.None:
+            return null;
+          case Scan.Forward:
+            chunk = await _reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
+            break;
+          case Scan.Backward:
+            chunk = await _reader.ReadLastAsync(0, chunk.BeginPosition);
+            break;
+          default:
+            Debug.Fail("Invalid scan");
+            break;
+        }
       }
     }
 

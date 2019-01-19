@@ -41,34 +41,18 @@ namespace ChunkIO {
     // having an active writer.
     //
     // Takes ownership of the encoder. TimeSeriesWriter.Dispose() will dispose it.
-    public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder) {
-      if (fname == null) throw new ArgumentNullException(nameof(fname));
-      if (encoder == null) throw new ArgumentNullException(nameof(encoder));
-
-      // Guarantees:
-      //
-      //   * If the writer process terminates unexpectedly, we'll lose at most 1h+5m worth of data.
-      //   * If the OS terminates unexpectedly, we'll lose at most 3h+1h worth of data.
-      //
-      // We flush data more often than necessary with a different factor for every file. This is done
-      // to avoid flushing a large number of files at the same time periodically.
-      //
-      // It's possible to make these values configurable if this becomes necessary in the future.
-      var rand = new Random((int)SipHash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(fname)));
-      var opt = new BufferedWriterOptions();
-      opt.CloseBuffer.Size = 64 << 10;
-      // Auto-close buffers older than 1h. This timer starts when a buffer is created.
-      opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
-      // Flush all closed buffers older than 5m to OS. This timer when a buffer is closed.
-      opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
-      // Flush all closed buffers older than 3h to disk. This timer when a buffer is closed.
-      opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
-      _writer = new BufferedWriter(fname, opt);
-      Encoder = encoder;
-
-      // Returns t multiplied by a random number in [0.5, 1).
-      TimeSpan Jitter(TimeSpan t) => TimeSpan.FromTicks((long)((0.5 * rand.NextDouble() + 0.5) * t.Ticks));
+    public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder, BufferedWriterOptions opt) {
+      Encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
+      try {
+        _writer = new BufferedWriter(fname, opt);
+      } catch {
+        Encoder.Dispose();
+        throw;
+      }
     }
+
+    public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
+        : this(fname, encoder, new BufferedWriterOptions()) { }
 
     // Methods of the encoder can be called from arbitrary threads between the calll to Write() and
     // the completion of the task it returns.

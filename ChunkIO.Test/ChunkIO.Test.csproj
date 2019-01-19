@@ -46,6 +46,7 @@
     <Compile Include="IntegrationTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="RemoteFlushTest.cs" />
+    <Compile Include="TimeSeriesTest.cs" />
     <Compile Include="SipHashTest.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -7,6 +7,30 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO.Test {
+  static class WriterOptions {
+    public static BufferedWriterOptions ForFile(string fname) {
+      // Guarantees:
+      //
+      //   * If the writer process terminates unexpectedly, we'll lose at most 1h+5m worth of data.
+      //   * If the OS terminates unexpectedly, we'll lose at most 3h+1h worth of data.
+      //
+      // We flush data more often than necessary with a different factor for every file. This is done
+      // to avoid flushing a large number of files at the same time periodically.
+      var rand = new Random(fname.GetHashCode());
+      var opt = new BufferedWriterOptions();
+      // Auto-close buffers older than 1h. This timer starts when a buffer is created.
+      opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
+      // Flush all closed buffers older than 5m to OS. This timer when a buffer is closed.
+      opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
+      // Flush all closed buffers older than 3h to disk. This timer when a buffer is closed.
+      opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
+      return opt;
+
+      // Returns t multiplied by a random number in [0.5, 1).
+      TimeSpan Jitter(TimeSpan t) => TimeSpan.FromTicks((long)((0.5 * rand.NextDouble() + 0.5) * t.Ticks));
+    }
+  }
+
   [TestClass]
   public class TradeSerializationExample {
     struct Trade {
@@ -34,7 +58,7 @@ namespace ChunkIO.Test {
     }
 
     class TradeWriter : TimeSeriesWriter<Event<Trade>> {
-      public TradeWriter(string fname) : base(fname, new TradeEncoder()) { }
+      public TradeWriter(string fname) : base(fname, new TradeEncoder(), WriterOptions.ForFile(fname)) { }
     }
 
     class TradeReader : TimeSeriesReader<Event<Trade>> {
@@ -169,7 +193,7 @@ namespace ChunkIO.Test {
     }
 
     class OrderBookWriter : TimeSeriesWriter<Event<PriceLevel[]>> {
-      public OrderBookWriter(string fname) : base(fname, new OrderBookPatchEncoder()) { }
+      public OrderBookWriter(string fname) : base(fname, new OrderBookPatchEncoder(), WriterOptions.ForFile(fname)) { }
     }
 
     class OrderBookReader : TimeSeriesReader<Event<OrderBookUpdate>> {
