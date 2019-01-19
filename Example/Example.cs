@@ -102,7 +102,7 @@ namespace ChunkIO.Example {
         => $"{e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")} => {Print(e.Value)}";
   }
 
-  class Program {
+  class Example {
     static DateTime T0 { get; } = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     static async Task WriteOrderBooks(string fname) {

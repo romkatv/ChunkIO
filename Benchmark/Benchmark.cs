@@ -25,7 +25,7 @@ namespace ChunkIO.Benchmark {
     public EmptyReader(string fname) : base(fname, new EmptyDecoder()) { }
   }
 
-  class Program {
+  class Benchmark {
     // Writes Empty records to the specified file for the specified amount of time.
     // Returns the number of written records. Records have timestamps with consecutive
     // ticks starting from 1.
