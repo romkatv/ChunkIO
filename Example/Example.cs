@@ -145,7 +145,13 @@ namespace ChunkIO.Example {
     static async Task ReadOrderBooks(string fname, DateTime from) {
       Console.WriteLine("Reading order books starting from {1:yyyy-MM-dd HH:mm:ss}", fname, from);
       using (var reader = new OrderBookReader(fname)) {
-        // Read all orders books with timestamps after `from`.
+        // It's a good idea to ask potential writers that might be writing to our file right now to
+        // flush their buffers. There are no writers in this example at this point but this call
+        // doesn't hurt.
+        await reader.FlushRemoteWriterAsync(flushToDisk: false);
+        // Read all chunks but skip the ones whose successors have timestamps >= from.
+        // In other words, we'll read all order books after `from` and perhaps a little bit
+        // extra before that.
         await reader.ReadAfter(from).ForEachAsync(ProcessChunks);
       }
 
