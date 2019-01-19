@@ -10,7 +10,7 @@ namespace ChunkIO.Benchmark {
   struct Empty { }
 
   class EmptyEncoder : EventEncoder<Empty> {
-    protected override void Encode(BinaryWriter writer, Empty trade, bool isPrimary) { }
+    protected override void Encode(BinaryWriter writer, Empty rec, bool isPrimary) { }
   }
 
   class EmptyDecoder : EventDecoder<Empty> {
