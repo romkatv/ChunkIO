@@ -53,7 +53,7 @@ namespace ChunkIO.Benchmark {
       using (var reader = new EmptyReader(fname)) {
         long records = 0;
         DateTime start = DateTime.UtcNow;
-        await reader.ReadAllAfter(DateTime.MinValue).ForEachAsync((IEnumerable<Event<Empty>> buf) => {
+        await reader.ReadAfter(DateTime.MinValue).ForEachAsync((IEnumerable<Event<Empty>> buf) => {
           records += buf.Count();
           return Task.CompletedTask;
         });
@@ -76,7 +76,7 @@ namespace ChunkIO.Benchmark {
         do {
           ++seeks;
           var t = new DateTime(rng.Next((int)maxTicks + 1), DateTimeKind.Utc);
-          await reader.ReadAllAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
+          await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
         } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
         seconds = (DateTime.UtcNow - start).TotalSeconds;
         Console.WriteLine("SeekMany: {0:N} seeks, {1:N1} seeks/sec", seeks, seeks / seconds);

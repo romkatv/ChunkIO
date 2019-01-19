@@ -22,6 +22,8 @@ namespace ChunkIO {
 
     public void Dispose() => Dispose(true);
 
+    // Inheriting from EventDecoder?
+    // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
     protected virtual void Dispose(bool disposing) {
       if (disposing) _writer?.Dispose();
     }
@@ -52,6 +54,8 @@ namespace ChunkIO {
 
     public void Dispose() => Dispose(true);
 
+    // Inheriting from EventDecoder?
+    // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
     protected virtual void Dispose(bool disposing) {
       if (disposing) _reader?.Dispose();
     }

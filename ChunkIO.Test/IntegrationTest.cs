@@ -84,7 +84,7 @@ namespace ChunkIO.Test {
             // Production code should probably avoid materializing all data like we do here.
             // Instead, it should either iterate over the result of Sync() or -- even better --
             // use ForEachAsync() instead of Sync().
-            Event<Trade>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+            Event<Trade>[][] chunks = reader.ReadAfter(new DateTime(0))
                 .Sync()
                 .Select(c => c.ToArray())
                 .ToArray();
@@ -188,7 +188,7 @@ namespace ChunkIO.Test {
           }
           using (var reader = new OrderBookReader(fname)) {
             reader.FlushRemoteWriterAsync(flushToDisk: false).Wait();
-            Event<OrderBookUpdate>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+            Event<OrderBookUpdate>[][] chunks = reader.ReadAfter(new DateTime(0))
                 .Sync()
                 .Select(c => c.ToArray())
                 .ToArray();
