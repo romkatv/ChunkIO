@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO.Example {
+  // One price level of a limit order book.
   struct PriceLevel {
     public PriceLevel(decimal price, decimal size) {
       Debug.Assert(price != 0);
@@ -23,6 +24,7 @@ namespace ChunkIO.Example {
     public override string ToString() => $"({(Price < 0 ? "sell" : "buy")} {Size} @ {Math.Abs(Price)})";
   }
 
+  // Helper class for building order books out of patches.
   class OrderBook {
     Dictionary<decimal, decimal> _levels = new Dictionary<decimal, decimal>();
 
@@ -37,6 +39,7 @@ namespace ChunkIO.Example {
     }
   }
 
+  // Encoder for PriceLevel[]. It allows us to write Event<PriceLevel[]> to ChunkIO.
   class OrderBookPatchEncoder : EventEncoder<PriceLevel[]> {
     readonly OrderBook _book = new OrderBook();
 
@@ -53,6 +56,7 @@ namespace ChunkIO.Example {
     }
   }
 
+  // Decoder for PriceLevel[]. It allows us to read Event<PriceLevel[]> from ChunkIO.
   class OrderBookUpdateDecoder : EventDecoder<PriceLevel[]> {
     protected override PriceLevel[] Decode(BinaryReader reader, bool isPrimary) {
       // It so happens that decoding in our examle doesn't depend on isPrimary, but it could.
@@ -69,6 +73,10 @@ namespace ChunkIO.Example {
   class OrderBookWriter : TimeSeriesWriter<Event<PriceLevel[]>> {
     public OrderBookWriter(string fname) : base(fname, new OrderBookPatchEncoder(), Opt(fname)) { }
 
+    // Returns options for the writer.
+    //
+    // The defaults WriterOptions doesn't define any time-based triggers, so it's important to set
+    // them manually. These options are recommended for production use.
     public static WriterOptions Opt(string fname) {
       // Guarantees:
       //
@@ -96,30 +104,28 @@ namespace ChunkIO.Example {
     public OrderBookReader(string fname) : base(fname, new OrderBookUpdateDecoder()) { }
   }
 
-  static class Printer {
-    public static string Print(PriceLevel[] lvl) => "[" + string.Join(", ", lvl) + "]";
-    public static string Print(Event<PriceLevel[]> e)
-        => $"{e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")} => {Print(e.Value)}";
-  }
-
   class Example {
     static DateTime T0 { get; } = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
+    public static string Print(PriceLevel[] lvl) => "[" + string.Join(", ", lvl) + "]";
+    public static string Print(Event<PriceLevel[]> e) => $"{e.Timestamp.ToString("HH:mm")} => {Print(e.Value)}";
+
+    // Writes a bunch of order books to the specified file.
     static async Task WriteOrderBooks(string fname) {
       Console.WriteLine("Writing order books...");
       using (var writer = new OrderBookWriter(fname)) {
-        // Initial snapshot.
-        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromSeconds(0), new[] {
+        // Initial snapshot. It'll go into the first chunk.
+        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(0), new[] {
           new PriceLevel(2, 3),
           new PriceLevel(3, 1),
           new PriceLevel(-5, 2),
         }));
-        // A couple of patches.
-        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromSeconds(1), new[] {
+        // A couple of patches. They'll go into the same chunk as the initial snapshot.
+        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(1), new[] {
           new PriceLevel(3, 0),
           new PriceLevel(4, 1),
         }));
-        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromSeconds(2), new[] {
+        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(2), new[] {
           new PriceLevel(-6, 4),
         }));
 
@@ -127,8 +133,8 @@ namespace ChunkIO.Example {
         // we'll read from the file later.
         Console.WriteLine("Flushing and writing some more...");
         await writer.FlushAsync(flushToDisk: false);
-        // Write one more patch.
-        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromSeconds(3), new[] {
+        // Write one more patch. It will be encoded as a snapshot in the second chunk.
+        await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(3), new[] {
           new PriceLevel(2, 0),
           new PriceLevel(-6, 2),
         }));
@@ -136,22 +142,23 @@ namespace ChunkIO.Example {
         Task Write(Event<PriceLevel[]> e) {
           // We are always sending patches to the writer. The writer then decides whether to
           // encode them as snapshots or patches on disk.
-          Console.WriteLine("  {0}", Printer.Print(e));
+          Console.WriteLine("  {0}", Print(e));
           return writer.Write(e);
         }
       }
     }
 
+    // Reads order books from the specified file. Skips chunks whose successors have timestamps not
+    // smaller than the specified time. In other words, it reads all order books after `from` and
+    // perhaps a little bit extra before that.
     static async Task ReadOrderBooks(string fname, DateTime from) {
-      Console.WriteLine("Reading order books starting from {1:yyyy-MM-dd HH:mm:ss}", fname, from);
+      Console.WriteLine("Reading order books starting from {1:yyyy-MM-dd HH:mm}", fname, from);
       using (var reader = new OrderBookReader(fname)) {
         // It's a good idea to ask potential writers that might be writing to our file right now to
         // flush their buffers. There are no writers in this example at this point but this call
         // doesn't hurt.
         await reader.FlushRemoteWriterAsync(flushToDisk: false);
-        // Read all chunks but skip the ones whose successors have timestamps >= from.
-        // In other words, we'll read all order books after `from` and perhaps a little bit
-        // extra before that.
+        // Now read order books one chunk at a time.
         await reader.ReadAfter(from).ForEachAsync(ProcessChunks);
       }
 
@@ -160,7 +167,7 @@ namespace ChunkIO.Example {
         // always a snapshot and the rest are always patches.
         bool isPrimary = true;
         foreach (Event<PriceLevel[]> e in chunks) {
-          Console.WriteLine("  {0}: {1}", isPrimary ? "Snapshot" : "Patch   ", Printer.Print(e));
+          Console.WriteLine("  {0}: {1}", isPrimary ? "Snapshot" : "Patch   ", Print(e));
           isPrimary = false;
         }
         return Task.CompletedTask;
@@ -170,29 +177,29 @@ namespace ChunkIO.Example {
     // Sample output:
     //
     //   Writing order books...
-    //     2000-01-01 00:00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     2000-01-01 00:00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     2000-01-01 00:00:02 => [(sell 4 @ 6)]
+    //     00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
+    //     00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
+    //     00:02 => [(sell 4 @ 6)]
     //   Flushing and writing some more...
-    //     2000-01-01 00:00:03 => [(buy 0 @ 2), (sell 2 @ 6)]
+    //     00:03 => [(buy 0 @ 2), (sell 2 @ 6)]
     //
     //   Reading order books starting from 0001-01-01 00:00:00
-    //     Snapshot: 2000-01-01 00:00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     Patch   : 2000-01-01 00:00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     Patch   : 2000-01-01 00:00:02 => [(sell 4 @ 6)]
-    //     Snapshot: 2000-01-01 00:00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //     Snapshot: 00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
+    //     Patch   : 00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
+    //     Patch   : 00:02 => [(sell 4 @ 6)]
+    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
     //
     //   Reading order books starting from 2000-01-01 00:00:02
-    //     Snapshot: 2000-01-01 00:00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     Patch   : 2000-01-01 00:00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     Patch   : 2000-01-01 00:00:02 => [(sell 4 @ 6)]
-    //     Snapshot: 2000-01-01 00:00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //     Snapshot: 00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
+    //     Patch   : 00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
+    //     Patch   : 00:02 => [(sell 4 @ 6)]
+    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
     //
     //   Reading order books starting from 2000-01-01 00:00:03
-    //     Snapshot: 2000-01-01 00:00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
     //
     //   Reading order books starting from 9999-12-31 23:59:59
-    //     Snapshot: 2000-01-01 00:00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
     static int Main(string[] args) {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
       try {
@@ -201,12 +208,12 @@ namespace ChunkIO.Example {
         // Reading from DateTime.MinValue always gives all data.
         ReadOrderBooks(fname, DateTime.MinValue).Wait();
         Console.WriteLine();
-        // This will also give us all data because the first chunk with timestamp >= T0 + 2s is
+        // This will also give us all data because the first chunk with timestamp >= T0 + 2m is
         // the very first one.
-        ReadOrderBooks(fname, T0 + TimeSpan.FromSeconds(2)).Wait();
+        ReadOrderBooks(fname, T0 + TimeSpan.FromMinutes(2)).Wait();
         Console.WriteLine();
         // This will give us only the second chunk.
-        ReadOrderBooks(fname, T0 + TimeSpan.FromSeconds(3)).Wait();
+        ReadOrderBooks(fname, T0 + TimeSpan.FromMinutes(3)).Wait();
         Console.WriteLine();
         // Reading from DateTime.MaxValue always gives the very last chunk.
         ReadOrderBooks(fname, DateTime.MaxValue).Wait();
