@@ -135,7 +135,7 @@ namespace ChunkIO {
       await _sem.WaitAsync();
       if (_buf != null) return new LockedBuffer(_buf, isNew: false);
       _buf = new Buffer(this);
-      await _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
+      await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
        return new LockedBuffer(_buf, isNew: true);
     }
 
@@ -177,18 +177,16 @@ namespace ChunkIO {
     }
 
     async Task DoCloseBuffer(bool? flushToDisk) {
+      Debug.Assert(!_disposed);
+      Debug.Assert(_sem.CurrentCount == 0);
       if (_buf != null) {
         if (!_buf.IsAbandoned) _buf.FireOnClose();
         if (!_buf.IsAbandoned) {
           ArraySegment<byte> content = Compression.Compress(
               _buf.Stream.GetBuffer(), 0, (int)_buf.Stream.Length, _opt.CompressionLevel);
           await _writer.WriteAsync(_buf.UserData, content.Array, content.Offset, content.Count);
-          if (_bufDisk == null && _opt.FlushToDisk?.Age != null) {
-            await _flushToDisk.RunAt(DateTime.UtcNow + _opt.FlushToDisk.Age.Value);
-          }
-          if (_bufOS == null && _opt.FlushToOS?.Age != null) {
-            await _flushToOS.RunAt(DateTime.UtcNow + _opt.FlushToOS.Age.Value);
-          }
+          if (_bufDisk == null) await _flushToDisk.ScheduleAt(DateTime.UtcNow + _opt.FlushToDisk.Age);
+          if (_bufOS == null) await _flushToOS.ScheduleAt(DateTime.UtcNow + _opt.FlushToOS.Age);
           _bufOS = (_bufOS ?? 0) + _buf.Stream.Length;
           _bufDisk = (_bufDisk ?? 0) + _buf.Stream.Length;
         }
@@ -205,6 +203,8 @@ namespace ChunkIO {
     }
 
     async Task DoFlush(bool flushToDisk) {
+      Debug.Assert(!_disposed);
+      Debug.Assert(_sem.CurrentCount == 0);
       Debug.Assert((_bufDisk ?? -1) >= (_bufOS ?? -1));
       if (_bufDisk == null || !flushToDisk && _bufOS == null) return;
       await _writer.FlushAsync(flushToDisk);
@@ -217,11 +217,13 @@ namespace ChunkIO {
     }
 
     async Task Unlock() {
+      Debug.Assert(!_disposed);
+      Debug.Assert(_sem.CurrentCount == 0);
       try {
         if (_buf.Stream.Length >= _buf.CloseAtSize || _buf.IsAbandoned) {
           await DoCloseBuffer(flushToDisk: null);
         } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeBuffer.Time) {
-          await _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge);
+          await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
         }
       } finally {
         _sem.Release();
@@ -347,7 +349,7 @@ namespace ChunkIO {
     }
 
     // The returned task completes when the action is scheduled, which happens almost immediately.
-    public async Task RunAt(DateTime? t) {
+    public async Task ScheduleAt(DateTime? t) {
       await Stop();
       if (t.HasValue) {
         Time = t;

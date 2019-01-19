@@ -36,7 +36,7 @@ namespace ChunkIO {
       // Auto-close buffers older than 1h.
       opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
       // As soon as a buffer is closed, flush to the OS.
-      opt.FlushToOS.Age = Jitter(TimeSpan.Zero);
+      opt.FlushToOS.Size = 0;
       // Flush all closed buffers older than 3h to disk.
       opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
       _writer = new BufferedWriter(fname, opt);
