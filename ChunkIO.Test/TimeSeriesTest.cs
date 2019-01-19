@@ -25,7 +25,7 @@ namespace ChunkIO.Test {
     }
 
     class Writer : TimeSeriesWriter<Event<long>> {
-      public Writer(string fname) : base(fname, new Encoder(), new BufferedWriterOptions() { CloseBuffer = null }) { }
+      public Writer(string fname) : base(fname, new Encoder(), new ChunkIO.WriterOptions() { CloseChunk = null }) { }
     }
 
     class Reader : TimeSeriesReader<Event<long>> {

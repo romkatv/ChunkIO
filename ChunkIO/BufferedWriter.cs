@@ -9,52 +9,52 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  // It's illegal to call any method of OutputBuffer or its Stream when the buffer isn't locked.
-  // Locked buffers are returned by BufferedWriter.LockBuffer(). They must be unlocked with
-  // OutputBuffer.DisposeAsync() or OutputBuffer.Dispose().
+  // It's illegal to call any method of OutputChunk or its Stream when the chunk isn't locked.
+  // Locked chunks are returned by BufferedWriter.LockChunk(). They must be unlocked with
+  // OutputChunk.DisposeAsync() or OutputChunk.Dispose().
   //
-  // Writes to the buffer do not block on IO but DisposeAsync() and Dispose() potentially do.
-  interface IOutputBuffer : IDisposable, IAsyncDisposable {
-    // Called right before the buffer is closed unless it was abandoned. Afterwards the buffer no
+  // Writes to the chunk do not block on IO but DisposeAsync() and Dispose() potentially do.
+  interface IOutputChunk : IDisposable, IAsyncDisposable {
+    // Called right before the chunk is closed unless it was abandoned. Afterwards the chunk no
     // longer gets used, so there is no need to unsubscribe from the event. Can fire either
-    // synchronously from DisposeAsync() or Dispose(), or from another thread at any time. The buffer is
+    // synchronously from DisposeAsync() or Dispose(), or from another thread at any time. The chunk is
     // considered locked when the event fires, hence it's legal to write to it. If Abandon() is
-    // called from OnClose, the buffer is dropped on the floor.
+    // called from OnClose, the chunk is dropped on the floor.
     event Action OnClose;
 
-    // Flush() and FlushAsync() have no effect. Use BufferedWriter.CloseBufferAsync() and
-    // BufferedWriter.FlushAsync() to close and flush the buffer.
+    // Flush() and FlushAsync() have no effect. Use BufferedWriter.CloseChunkAsync() and
+    // BufferedWriter.FlushAsync() to close and flush the chunk.
     //
     // The user MUST NOT Dispose() or Close() the stream.
     MemoryStream Stream { get; }
 
-    // This buffer was created by the latest call to BufferedWriter.GetBuffer().
+    // This chunk was created by the latest call to BufferedWriter.GetChunk().
     bool IsNew { get; }
-    // Time when this buffer was created.
+    // Time when this chunk was created.
     DateTime CreatedAt { get; }
     // User data of the chunk. Passed through to the underlying ChunkWriter. Set to default(UserData)
     // in new chunks.
     UserData UserData { get; set; }
-    // Placeholder for anything the user might need to store alongside the buffer. Set to null in
+    // Placeholder for anything the user might need to store alongside the chunk. Set to null in
     // new chunks.
     object UserState { get; set; }
 
-    // When a buffer is created, CloseAtSize and CloseAtAge are set to
-    // BufferedWriterOptions.CloseBuffer.Size and BufferedWriterOptions.Age respectively.
+    // When a chunk is created, CloseAtSize and CloseAtAge are set to
+    // BufferedWriterOptions.CloseChunk.Size and BufferedWriterOptions.Age respectively.
     //
-    // A buffer is automatically closed when all of the following conditions are true:
+    // A chunk is automatically closed when all of the following conditions are true:
     //
-    // 1. The buffer is not locked.
+    // 1. The chunk is not locked.
     // 2. BytesWritten >= CloseAtSize || DateTime.UtcNow - CreatedAt >= CloseAtAge.
     //
-    // An implication of this is that the buffer won't get closed if the second condition
-    // becomes true while the buffer is locked as long as it reverts to false before unlocking.
+    // An implication of this is that the chunk won't get closed if the second condition
+    // becomes true while the chunk is locked as long as it reverts to false before unlocking.
     long? CloseAtSize { get; set; }
     TimeSpan? CloseAtAge { get; set; }
 
-    // Drops the buffer without writing it to disk. The user must still unlock the buffer with
-    // DisposeAsync() or Dispose() after calling Abandon(). The next call to BufferedWriter.LockBuffer()
-    // will create a new buffer.
+    // Drops the chunk without writing it to disk. The user must still unlock the chunk with
+    // DisposeAsync() or Dispose() after calling Abandon(). The next call to BufferedWriter.LockChunk()
+    // will create a new chunk.
     //
     // It's legal to call Abandon() from OnClose. If called before OnClose is fired, the latter
     // won't fire.
@@ -73,16 +73,16 @@ namespace ChunkIO {
     }
   }
 
-  public class BufferedWriterOptions {
+  public class WriterOptions {
     public bool AllowRemoteFlush { get; set; } = true;
     public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
-    public Triggers CloseBuffer { get; set; } = new Triggers() { Size = 64 << 10 };
+    public Triggers CloseChunk { get; set; } = new Triggers() { Size = 64 << 10 };
     public Triggers FlushToOS { get; set; } = new Triggers();
     public Triggers FlushToDisk { get; set; } = new Triggers();
 
-    public BufferedWriterOptions Clone() {
-      var res = (BufferedWriterOptions)MemberwiseClone();
-      res.CloseBuffer = res.CloseBuffer?.Clone();
+    public WriterOptions Clone() {
+      var res = (WriterOptions)MemberwiseClone();
+      res.CloseChunk = res.CloseChunk?.Clone();
       res.FlushToOS = res.FlushToOS?.Clone();
       res.FlushToDisk = res.FlushToDisk?.Clone();
       return res;
@@ -92,7 +92,7 @@ namespace ChunkIO {
       if (!Enum.IsDefined(typeof(CompressionLevel), CompressionLevel)) {
         throw new Exception($"Invalid CompressionLevel: {CompressionLevel}");
       }
-      CloseBuffer?.Validate();
+      CloseChunk?.Validate();
       FlushToOS?.Validate();
       FlushToDisk?.Validate();
     }
@@ -100,25 +100,25 @@ namespace ChunkIO {
 
   sealed class BufferedWriter : IDisposable {
     readonly SemaphoreSlim _sem = new SemaphoreSlim(1, 1);
-    readonly BufferedWriterOptions _opt;
+    readonly WriterOptions _opt;
     readonly ChunkWriter _writer;
     readonly IDisposable _listener;
-    readonly Timer _closeBuffer;
+    readonly Timer _closeChunk;
     readonly Timer _flushToOS;
     readonly Timer _flushToDisk;
-    Buffer _buf = null;
+    Chunk _buf = null;
     long? _bufOS = null;
     long? _bufDisk = null;
     volatile bool _disposed = false;
 
-    public BufferedWriter(string fname) : this(fname, new BufferedWriterOptions()) { }
+    public BufferedWriter(string fname) : this(fname, new WriterOptions()) { }
 
-    public BufferedWriter(string fname, BufferedWriterOptions opt) {
+    public BufferedWriter(string fname, WriterOptions opt) {
       if (opt == null) throw new ArgumentNullException(nameof(opt));
       opt.Validate();
       _opt = opt.Clone();
       _writer = new ChunkWriter(fname);
-      _closeBuffer = new Timer(_sem, () => DoCloseBuffer(flushToDisk: null));
+      _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null));
       _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false));
       _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true));
       if (opt.AllowRemoteFlush) {
@@ -128,29 +128,29 @@ namespace ChunkIO {
 
     public string Name => _writer.Name;
 
-    // If there is a current buffer, locks and returns it. IOutputBuffer.IsNew is false.
-    // Otherwise creates a new buffer, locks and returns it. IOutputBuffer.IsNew is true.
-    public async Task<IOutputBuffer> LockBuffer() {
+    // If there is a current chunk, locks and returns it. IOutputChunk.IsNew is false.
+    // Otherwise creates a new chunk, locks and returns it. IOutputChunk.IsNew is true.
+    public async Task<IOutputChunk> LockChunk() {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
       await _sem.WaitAsync();
-      if (_buf != null) return new LockedBuffer(_buf, isNew: false);
-      _buf = new Buffer(this);
-      await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
-       return new LockedBuffer(_buf, isNew: true);
+      if (_buf != null) return new LockedChunk(_buf, isNew: false);
+      _buf = new Chunk(this);
+      await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
+       return new LockedChunk(_buf, isNew: true);
     }
 
-    // If there is current buffer, waits until it gets unlocked and writes its content to
+    // If there is current chunk, waits until it gets unlocked and writes its content to
     // the underlying ChunkWriter. Otherwise does nothing.
-    public async Task CloseBufferAsync() {
+    public async Task CloseChunkAsync() {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      await _sem.WithLock(() => DoCloseBuffer(flushToDisk: null));
+      await _sem.WithLock(() => DoCloseChunk(flushToDisk: null));
     }
 
-    // 1. If there is current buffer, waits until it gets unlocked and closes it.
+    // 1. If there is current chunk, waits until it gets unlocked and closes it.
     // 2. Flushes the underlying ChunkWriter.
     public async Task FlushAsync(bool flushToDisk) {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      await _sem.WithLock(() => DoCloseBuffer(flushToDisk));
+      await _sem.WithLock(() => DoCloseChunk(flushToDisk));
     }
 
     public void Dispose() {
@@ -161,9 +161,9 @@ namespace ChunkIO {
         try {
           _sem.WithLock(async () => {
             try {
-              await DoCloseBuffer(flushToDisk: false);
+              await DoCloseChunk(flushToDisk: false);
             } finally {
-              await _closeBuffer.Stop();
+              await _closeChunk.Stop();
               await _flushToOS.Stop();
               await _flushToDisk.Stop();
               _writer.Dispose();
@@ -176,7 +176,7 @@ namespace ChunkIO {
       }
     }
 
-    async Task DoCloseBuffer(bool? flushToDisk) {
+    async Task DoCloseChunk(bool? flushToDisk) {
       Debug.Assert(!_disposed);
       Debug.Assert(_sem.CurrentCount == 0);
       if (_buf != null) {
@@ -190,7 +190,7 @@ namespace ChunkIO {
           _bufOS = (_bufOS ?? 0) + _buf.Stream.Length;
           _bufDisk = (_bufDisk ?? 0) + _buf.Stream.Length;
         }
-        await _closeBuffer.Stop();
+        await _closeChunk.Stop();
         _buf.Dispose();
         _buf = null;
       }
@@ -221,20 +221,20 @@ namespace ChunkIO {
       Debug.Assert(_sem.CurrentCount == 0);
       try {
         if (_buf.Stream.Length >= _buf.CloseAtSize || _buf.IsAbandoned) {
-          await DoCloseBuffer(flushToDisk: null);
-        } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeBuffer.Time) {
-          await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
+          await DoCloseChunk(flushToDisk: null);
+        } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeChunk.Time) {
+          await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
         }
       } finally {
         _sem.Release();
       }
     }
 
-    sealed class LockedBuffer : IOutputBuffer {
-      readonly Buffer _buf;
+    sealed class LockedChunk : IOutputChunk {
+      readonly Chunk _buf;
       bool _locked = true;
 
-      public LockedBuffer(Buffer buf, bool isNew) {
+      public LockedChunk(Chunk buf, bool isNew) {
         _buf = buf;
         IsNew = isNew;
       }
@@ -274,13 +274,13 @@ namespace ChunkIO {
       }
     }
 
-    sealed class Buffer : IDisposable {
+    sealed class Chunk : IDisposable {
       readonly BufferedWriter _writer;
 
-      public Buffer(BufferedWriter writer) {
+      public Chunk(BufferedWriter writer) {
         _writer = writer;
-        CloseAtSize = writer._opt.CloseBuffer?.Size;
-        CloseAtAge = writer._opt.CloseBuffer?.Age;
+        CloseAtSize = writer._opt.CloseChunk?.Size;
+        CloseAtAge = writer._opt.CloseChunk?.Age;
       }
 
       public event Action OnClose;

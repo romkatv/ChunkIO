@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO.Test {
   static class WriterOptions {
-    public static BufferedWriterOptions ForFile(string fname) {
+    public static ChunkIO.WriterOptions ForFile(string fname) {
       // Guarantees:
       //
       //   * If the writer process terminates unexpectedly, we'll lose at most 1h+5m worth of data.
@@ -17,12 +17,12 @@ namespace ChunkIO.Test {
       // We flush data more often than necessary with a different factor for every file. This is done
       // to avoid flushing a large number of files at the same time periodically.
       var rand = new Random(fname.GetHashCode());
-      var opt = new BufferedWriterOptions();
-      // Auto-close buffers older than 1h. This timer starts when a buffer is created.
-      opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
-      // Flush all closed buffers older than 5m to OS. This timer when a buffer is closed.
+      var opt = new ChunkIO.WriterOptions();
+      // Auto-close chunks older than 1h. This timer starts when a chunk is created.
+      opt.CloseChunk.Age = Jitter(TimeSpan.FromHours(1));
+      // Flush all closed chunks older than 5m to OS. This timer when a chunk is closed.
       opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
-      // Flush all closed buffers older than 3h to disk. This timer when a buffer is closed.
+      // Flush all closed chunks older than 3h to disk. This timer when a chunk is closed.
       opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
       return opt;
 

@@ -10,13 +10,13 @@ namespace ChunkIO {
   //
   // Methods can be called from arbitrary threads but never concurrently.
   public interface ITimeSeriesEncoder<T> : IDisposable {
-    // Writes the first value to an empty buffer and returns its timestamp.
+    // Writes the first value to an empty chunk and returns its timestamp.
     // If the timestamp is not in UTC, it is converted to UTC. This timestamp
-    // is used by TimeSeriesReader.ReadAfter() to figure out which buffers
+    // is used by TimeSeriesReader.ReadAfter() to figure out which chunks
     // to skip.
     DateTime EncodePrimary(Stream strm, T val);
 
-    // Writes a non-first value to a non-empty buffer.
+    // Writes a non-first value to a non-empty chunk.
     void EncodeSecondary(Stream strm, T val);
   }
 
@@ -24,11 +24,11 @@ namespace ChunkIO {
   //
   // Methods can be called from arbitrary threads but never concurrently.
   public interface ITimeSeriesDecoder<T> : IDisposable {
-    // Decodes the first value of the buffer. This value was encoded EncodePrimary() and
+    // Decodes the first value of the chunk. This value was encoded EncodePrimary() and
     // the timestmap was also produced by it (except that here it is always in UTC).
     void DecodePrimary(Stream strm, DateTime t, out T val);
 
-    // Decodes a non-first value of the buffer. It was encoded by EncodeSecondary().
+    // Decodes a non-first value of the chunk. It was encoded by EncodeSecondary().
     bool DecodeSecondary(Stream strm, out T val);
   }
 
@@ -41,7 +41,7 @@ namespace ChunkIO {
     // having an active writer.
     //
     // Takes ownership of the encoder. TimeSeriesWriter.Dispose() will dispose it.
-    public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder, BufferedWriterOptions opt) {
+    public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder, WriterOptions opt) {
       Encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
       try {
         _writer = new BufferedWriter(fname, opt);
@@ -52,7 +52,7 @@ namespace ChunkIO {
     }
 
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
-        : this(fname, encoder, new BufferedWriterOptions()) { }
+        : this(fname, encoder, new WriterOptions()) { }
 
     // Methods of the encoder can be called from arbitrary threads between the calll to Write() and
     // the completion of the task it returns.
@@ -62,7 +62,7 @@ namespace ChunkIO {
     //
     // It's illegal to call Write() before the task returned by the previous call to Write() has completed.
     public async Task Write(T val) {
-      IOutputBuffer buf = await _writer.LockBuffer();
+      IOutputChunk buf = await _writer.LockChunk();
       try {
         if (buf.IsNew) {
           buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
@@ -134,17 +134,17 @@ namespace ChunkIO {
     // This method can be called concurrently with any other method and with itself.
     public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
 
-    // Reads timestamped records from the file and returns them one buffer at a time. Each IEnumerable<T>
-    // corresponds to a single buffer, the first element being "primary" and the rest "secondary".
+    // Reads timestamped records from the file and returns them one chunk at a time. Each IEnumerable<T>
+    // corresponds to a single chunk, the first element being "primary" and the rest "secondary".
     //
-    // Buffers whose successor's primary record's timestamp is not greater than t are not read.
+    // Chunks whose successor's primary record's timestamp is not greater than t are not read.
     // Thus, ReadAfter(DateTime.MinValue) reads all data.
     public IAsyncEnumerable<IEnumerable<T>> ReadAfter(DateTime t) {
       return new AsyncEnumerable<IEnumerable<T>>(async yield => {
-        InputBuffer buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
+        InputChunk buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
         while (buf != null) {
           try {
-            await yield.ReturnAsync(DecodeBuffer(buf, Decoder));
+            await yield.ReturnAsync(DecodeChunk(buf, Decoder));
           } finally {
             buf.Dispose();
           }
@@ -167,7 +167,7 @@ namespace ChunkIO {
       }
     }
 
-    static IEnumerable<T> DecodeBuffer(InputBuffer buf, ITimeSeriesDecoder<T> decoder) {
+    static IEnumerable<T> DecodeChunk(InputChunk buf, ITimeSeriesDecoder<T> decoder) {
       decoder.DecodePrimary(buf, new DateTime(buf.UserData.Long0, DateTimeKind.Utc), out T val);
       yield return val;
       while (decoder.DecodeSecondary(buf, out val)) yield return val;
