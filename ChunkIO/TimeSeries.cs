@@ -138,7 +138,11 @@ namespace ChunkIO {
     // corresponds to a single chunk, the first element being "primary" and the rest "secondary".
     //
     // Chunks whose successor's primary record's timestamp is not greater than t are not read.
-    // Thus, ReadAfter(DateTime.MinValue) reads all data.
+    // Thus, ReadAfter(DateTime.MinValue) reads all data while ReadAfter(DateTime.MaxValue) reads
+    // just the last chunk.
+    //
+    // The caller doesn't have to iterate over all chunks (that is, over the whole IAsyncEnumerable) or
+    // over all records in a chunk (over IEnumerable<T>). It's OK to stop the iteration half-way.
     public IAsyncEnumerable<IEnumerable<T>> ReadAfter(DateTime t) {
       return new AsyncEnumerable<IEnumerable<T>>(async yield => {
         InputChunk buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
