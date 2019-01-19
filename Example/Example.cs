@@ -114,13 +114,21 @@ namespace ChunkIO.Example {
     static async Task WriteOrderBooks(string fname) {
       Console.WriteLine("Writing order books...");
       using (var writer = new OrderBookWriter(fname)) {
-        // Initial snapshot. It'll go into the first chunk.
+        // A helper function that prints to console everything we are writing.
+        Task Write(Event<PriceLevel[]> e) {
+          // We are always sending patches to the writer. The writer then decides whether to
+          // encode them as snapshots or patches on disk.
+          Console.WriteLine("  {0}", Print(e));
+          return writer.Write(e);
+        }
+
+        // Write the initial snapshot. It'll go into the first chunk.
         await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(0), new[] {
           new PriceLevel(2, 3),
           new PriceLevel(3, 1),
           new PriceLevel(-5, 2),
         }));
-        // A couple of patches. They'll go into the same chunk as the initial snapshot.
+        // Write a couple of patches. They'll go into the same chunk as the initial snapshot.
         await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(1), new[] {
           new PriceLevel(3, 0),
           new PriceLevel(4, 1),
@@ -139,12 +147,9 @@ namespace ChunkIO.Example {
           new PriceLevel(-6, 2),
         }));
 
-        Task Write(Event<PriceLevel[]> e) {
-          // We are always sending patches to the writer. The writer then decides whether to
-          // encode them as snapshots or patches on disk.
-          Console.WriteLine("  {0}", Print(e));
-          return writer.Write(e);
-        }
+        // In asynchronous code it's a good idea to manually flush the writer before disposing it.
+        // Otherwise Dispose() will block as it'll have to flush any unwritten data.
+        await writer.FlushAsync(flushToDisk: false);
       }
     }
 
