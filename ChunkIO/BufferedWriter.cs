@@ -22,11 +22,13 @@ namespace ChunkIO {
     // called from OnClose, the buffer is dropped on the floor.
     event Action OnClose;
 
-    // Append-only. Neither readable nor seakable. Flush() and FlushAsync() have no effect.
+    // Flush() and FlushAsync() have no effect. Use BufferedWriter.CloseBufferAsync() and
+    // BufferedWriter.FlushAsync() to close and flush the buffer.
     //
     // The user MUST NOT Dispose() or Close() the stream.
-    Stream Stream { get; }
+    MemoryStream Stream { get; }
 
+    // This buffer was created by the latest call to BufferedWriter.GetBuffer().
     bool IsNew { get; }
     // Time when this buffer was created.
     DateTime CreatedAt { get; }
@@ -36,11 +38,6 @@ namespace ChunkIO {
     // Placeholder for anything the user might need to store alongside the buffer. Set to null in
     // new chunks.
     object UserState { get; set; }
-
-    // How many bytes have been written to the buffer via its Stream methods.
-    // The meaning of BytesWritten is the same as Stream.Length, except that Length isn't available in
-    // IOutputBuffer.Stream because it's not seakable.
-    long BytesWritten { get; }
 
     // When a buffer is created, CloseAtSize and CloseAtAge are set to
     // BufferedWriterOptions.CloseBuffer.Size and BufferedWriterOptions.Age respectively.
@@ -183,7 +180,8 @@ namespace ChunkIO {
       if (_buf != null) {
         if (!_buf.IsAbandoned) _buf.FireOnClose();
         if (!_buf.IsAbandoned) {
-          ArraySegment<byte> content = _buf.Compressor.GetCompressedData();
+          ArraySegment<byte> content = Compression.Compress(
+              _buf.Stream.GetBuffer(), 0, (int)_buf.Stream.Length, _opt.CompressionLevel);
           await _writer.WriteAsync(_buf.UserData, content.Array, content.Offset, content.Count);
           if (_bufDisk == null && _opt.FlushToDisk?.Age != null) {
             await _flushToDisk.RunAt(DateTime.UtcNow + _opt.FlushToDisk.Age.Value);
@@ -191,8 +189,8 @@ namespace ChunkIO {
           if (_bufOS == null && _opt.FlushToOS?.Age != null) {
             await _flushToOS.RunAt(DateTime.UtcNow + _opt.FlushToOS.Age.Value);
           }
-          _bufOS = (_bufOS ?? 0) + _buf.BytesWritten;
-          _bufDisk = (_bufDisk ?? 0) + _buf.BytesWritten;
+          _bufOS = (_bufOS ?? 0) + _buf.Stream.Length;
+          _bufDisk = (_bufDisk ?? 0) + _buf.Stream.Length;
         }
         await _closeBuffer.Stop();
         _buf.Dispose();
@@ -220,7 +218,7 @@ namespace ChunkIO {
 
     async Task Unlock() {
       try {
-        if (_buf.BytesWritten >= _buf.CloseAtSize || _buf.IsAbandoned) {
+        if (_buf.Stream.Length >= _buf.CloseAtSize || _buf.IsAbandoned) {
           await DoCloseBuffer(flushToDisk: null);
         } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeBuffer.Time) {
           await _closeBuffer.RunAt(_buf.CreatedAt + _buf.CloseAtAge);
@@ -245,9 +243,8 @@ namespace ChunkIO {
       }
 
       public bool IsNew { get; }
-      public Stream Stream => _buf.Stream;
+      public MemoryStream Stream => _buf.Stream;
       public DateTime CreatedAt => _buf.CreatedAt;
-      public long BytesWritten => _buf.BytesWritten;
 
       public UserData UserData {
         get => _buf.UserData;
@@ -280,85 +277,24 @@ namespace ChunkIO {
 
       public Buffer(BufferedWriter writer) {
         _writer = writer;
-        Compressor = new Compressor(writer._opt.CompressionLevel);
         CloseAtSize = writer._opt.CloseBuffer?.Size;
         CloseAtAge = writer._opt.CloseBuffer?.Age;
       }
 
       public event Action OnClose;
 
-      public Stream Stream => Compressor;
+      public MemoryStream Stream { get; } = new MemoryStream(4 << 10);
       public DateTime CreatedAt { get; } = DateTime.UtcNow;
-      public long BytesWritten => Compressor.BytesWritten;
       public UserData UserData { get; set; }
       public object UserState { get; set; }
       public long? CloseAtSize { get; set; }
       public TimeSpan? CloseAtAge { get; set; }
-      public void Abandon() { IsAbandoned = true; }
-      public void Dispose() => Compressor.Dispose();
-
       public bool IsAbandoned { get; internal set; }
-      public Compressor Compressor { get; }
-      public void FireOnClose() { OnClose?.Invoke(); }
+
+      public void Abandon() { IsAbandoned = true; }
+      public void Dispose() => Stream.Dispose();
+      public void FireOnClose() => OnClose?.Invoke();
       public Task Unlock() => _writer.Unlock();
-    }
-
-    sealed class Compressor : DeflateStream {
-      public Compressor(CompressionLevel lvl) : base(new MemoryStream(16 << 10), lvl) { }
-
-      public long BytesWritten { get; internal set; }
-
-      public ArraySegment<byte> GetCompressedData() {
-        // TODO: The only way to get compressed data is to Dispose() first.
-        base.Flush();
-        var strm = (MemoryStream)BaseStream;
-        return new ArraySegment<byte>(strm.GetBuffer(), 0, (int)strm.Length);
-      }
-
-      public override void Flush() { }
-      public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-      public override void Write(byte[] buffer, int offset, int count) {
-        base.Write(buffer, offset, count);
-        BytesWritten += count;
-      }
-
-      public override void WriteByte(byte value) {
-        base.WriteByte(value);
-        ++BytesWritten;
-      }
-
-      public override async Task WriteAsync(byte[] buffer, int offset, int count,
-                                            CancellationToken cancellationToken) {
-        await base.WriteAsync(buffer, offset, count, cancellationToken);
-        BytesWritten += count;
-      }
-
-      public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count,
-                                              AsyncCallback callback, object state) {
-        return new AsyncResult(base.BeginWrite(buffer, offset, count, callback, state), count);
-      }
-
-      public override void EndWrite(IAsyncResult asyncResult) {
-        base.EndWrite(asyncResult);
-        BytesWritten += ((AsyncResult)asyncResult).Count;
-      }
-
-      class AsyncResult : IAsyncResult {
-        readonly IAsyncResult _r;
-
-        public AsyncResult(IAsyncResult r, int count) {
-          _r = r;
-          Count = count;
-        }
-
-        public int Count { get; }
-
-        public bool IsCompleted => _r.IsCompleted;
-        public WaitHandle AsyncWaitHandle => _r.AsyncWaitHandle;
-        public object AsyncState => _r.AsyncState;
-        public bool CompletedSynchronously => _r.CompletedSynchronously;
-      }
     }
   }
 

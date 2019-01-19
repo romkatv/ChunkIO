@@ -61,7 +61,7 @@ namespace ChunkIO {
     public bool ReadFrom(byte[] array) {
       Debug.Assert(array.Length >= Size);
       int offset = 0;
-      UserData.ReadFrom(array, ref offset);
+      UserData = UserData.ReadFrom(array, ref offset);
       ulong len = Encoding.UInt64.Read(array, ref offset);
       if (!Chunk.IsValidContentLength(len)) return false;
       ContentLength = (int)len;

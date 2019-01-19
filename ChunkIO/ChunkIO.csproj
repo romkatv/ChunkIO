@@ -47,6 +47,7 @@
     <Compile Include="AsyncEnumerable.cs" />
     <Compile Include="BufferedReader.cs" />
     <Compile Include="Chunk.cs" />
+    <Compile Include="Compression.cs" />
     <Compile Include="Encoding.cs" />
     <Compile Include="SipHash.cs" />
     <Compile Include="Tick.cs" />

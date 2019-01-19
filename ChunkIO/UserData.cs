@@ -151,23 +151,23 @@ namespace ChunkIO {
       array[offset++] = B15;
     }
 
-    public void ReadFrom(byte[] array, ref int offset) {
-      B0 = array[offset++];
-      B1 = array[offset++];
-      B2 = array[offset++];
-      B3 = array[offset++];
-      B4 = array[offset++];
-      B5 = array[offset++];
-      B6 = array[offset++];
-      B7 = array[offset++];
-      B8 = array[offset++];
-      B9 = array[offset++];
-      B10 = array[offset++];
-      B11 = array[offset++];
-      B12 = array[offset++];
-      B13 = array[offset++];
-      B14 = array[offset++];
-      B15 = array[offset++];
-    }
+    public static UserData ReadFrom(byte[] array, ref int offset) => new UserData {
+      B0 = array[offset++],
+      B1 = array[offset++],
+      B2 = array[offset++],
+      B3 = array[offset++],
+      B4 = array[offset++],
+      B5 = array[offset++],
+      B6 = array[offset++],
+      B7 = array[offset++],
+      B8 = array[offset++],
+      B9 = array[offset++],
+      B10 = array[offset++],
+      B11 = array[offset++],
+      B12 = array[offset++],
+      B13 = array[offset++],
+      B14 = array[offset++],
+      B15 = array[offset++]
+    };
   }
 }

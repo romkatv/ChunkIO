@@ -64,6 +64,7 @@ namespace ChunkIO {
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
+      if (from >= _reader.Length) return null;
       if (from == _last) {
         IChunk res = await Scan(from);
         if (res != null) return res;

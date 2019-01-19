@@ -47,8 +47,8 @@ namespace ChunkIO.Test {
       try {
         using (var writer = new TradeWriter(fname)) {
           for (int i = 0; i != 2; ++i) {
-            var t = new DateTime(i);
-            var trade = new Trade(price: 10 * i, size: 100 * i);
+            var t = new DateTime(i + 1, DateTimeKind.Utc);
+            var trade = new Trade(price: 10 * (i + 1), size: 100 * (i + 1));
             writer.Write(new Tick<Trade>(t, trade)).Wait();
           }
           using (var reader = new TradeReader(fname)) {
@@ -65,9 +65,9 @@ namespace ChunkIO.Test {
             Assert.AreEqual(2, ticks.Length);
             for (int i = 0; i != ticks.Length; ++i) {
               Tick<Trade> tick = ticks[i];
-              Assert.AreEqual(new DateTime(i), tick.Timestamp);
-              Assert.AreEqual(10 * i, tick.Value.Price);
-              Assert.AreEqual(100 * i, tick.Value.Size);
+              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), tick.Timestamp);
+              Assert.AreEqual(10 * (i + 1), tick.Value.Price);
+              Assert.AreEqual(100 * (i + 1), tick.Value.Size);
             }
           }
         }
@@ -154,8 +154,8 @@ namespace ChunkIO.Test {
       try {
         using (var writer = new OrderBookWriter(fname)) {
           for (int i = 0; i != 2; ++i) {
-            var t = new DateTime(i);
-            var lvl = new PriceLevel(price: 10 * i, size: 100 * i);
+            var t = new DateTime(i + 1, DateTimeKind.Utc);
+            var lvl = new PriceLevel(price: 10 * (i + 1), size: 100 * (i + 1));
             writer.Write(new Tick<PriceLevel[]>(t, new[] { lvl })).Wait();
           }
           using (var reader = new OrderBookReader(fname)) {
@@ -169,11 +169,11 @@ namespace ChunkIO.Test {
             Assert.AreEqual(2, ticks.Length);
             for (int i = 0; i != ticks.Length; ++i) {
               Tick<OrderBookUpdate> tick = ticks[i];
-              Assert.AreEqual(new DateTime(i), tick.Timestamp);
+              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), tick.Timestamp);
               Assert.AreEqual(i == 0, tick.Value.IsSnapshot);
               Assert.AreEqual(1, tick.Value.PriceLevels.Length);
-              Assert.AreEqual(10 * i, tick.Value.PriceLevels[0].Price);
-              Assert.AreEqual(100 * i, tick.Value.PriceLevels[0].Size);
+              Assert.AreEqual(10 * (i + 1), tick.Value.PriceLevels[0].Price);
+              Assert.AreEqual(100 * (i + 1), tick.Value.PriceLevels[0].Size);
             }
           }
         }
