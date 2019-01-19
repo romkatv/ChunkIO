@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChunkIO.Test", "ChunkIO.Tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmark", "Benchmark\Benchmark.csproj", "{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Example", "Example\Example.csproj", "{624486F5-5DB7-4BAE-86CC-0731A7E6B15A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,6 +32,10 @@ Global
 		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{624486F5-5DB7-4BAE-86CC-0731A7E6B15A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{624486F5-5DB7-4BAE-86CC-0731A7E6B15A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{624486F5-5DB7-4BAE-86CC-0731A7E6B15A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{624486F5-5DB7-4BAE-86CC-0731A7E6B15A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

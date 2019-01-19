@@ -13,7 +13,6 @@ namespace ChunkIO {
     }
 
     public DateTime Timestamp { get; }
-
     public T Value { get; }
   }
 
