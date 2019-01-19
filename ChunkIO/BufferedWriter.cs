@@ -135,7 +135,7 @@ namespace ChunkIO {
       await _sem.WaitAsync();
       if (_buf != null) return new LockedBuffer(_buf, isNew: false);
       _buf = new Buffer(this);
-      await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge.Value);
+      await _closeBuffer.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
        return new LockedBuffer(_buf, isNew: true);
     }
 

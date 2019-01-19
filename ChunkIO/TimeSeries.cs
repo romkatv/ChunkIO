@@ -6,17 +6,17 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  interface ITimeSeriesEncoder<T> : IDisposable {
+  public interface ITimeSeriesEncoder<T> : IDisposable {
     DateTime EncodePrimary(Stream strm, T val);
     void EncodeSecondary(Stream strm, T val);
   }
 
-  interface ITimeSeriesDecoder<T> : IDisposable {
+  public interface ITimeSeriesDecoder<T> : IDisposable {
     void DecodePrimary(Stream strm, DateTime t, out T val);
     bool DecodeSecondary(Stream strm, out T val);
   }
 
-  class TimeSeriesWriter<T> : IDisposable {
+  public class TimeSeriesWriter<T> : IDisposable {
     readonly BufferedWriter _writer;
 
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder) {
@@ -30,13 +30,13 @@ namespace ChunkIO {
       //
       // We flush data more often than necessary with a different factor for every file. This is done
       // to avoid flushing a large number of files at the same time periodically.
-      var rand = new Random(fname.GetHashCode());
+      var rand = new Random((int)SipHash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(fname)));
       var opt = new BufferedWriterOptions();
       opt.CloseBuffer.Size = 64 << 10;
       // Auto-close buffers older than 1h.
       opt.CloseBuffer.Age = Jitter(TimeSpan.FromHours(1));
-      // As soon as a buffer is closed, flush to the OS.
-      opt.FlushToOS.Size = 0;
+      // Flush all closed buffers older than 5m to OS.
+      opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
       // Flush all closed buffers older than 3h to disk.
       opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
       _writer = new BufferedWriter(fname, opt);
@@ -87,7 +87,7 @@ namespace ChunkIO {
     }
   }
 
-  class TimeSeriesReader<T> : IDisposable {
+  public class TimeSeriesReader<T> : IDisposable {
     readonly BufferedReader _reader;
 
     public TimeSeriesReader(string fname, ITimeSeriesDecoder<T> decoder) {

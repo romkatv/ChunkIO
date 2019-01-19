@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 namespace ChunkIO {
   // Port of the SipHash 2.4 reference C implementation.
   static class SipHash {
+    public static ulong ComputeHash(byte[] array) => ComputeHash(array, 0, array.Length);
+
     // These keys say "romkatv/chunkio1" in ASCII.
     public static ulong ComputeHash(byte[] array, int offset, int count) =>
         ComputeHash(array, offset, count, 0x2f7674616b6d6f72, 0x316f696b6e756863);

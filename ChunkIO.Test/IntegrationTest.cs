@@ -41,6 +41,34 @@ namespace ChunkIO.Test {
       public TradeReader(string fname) : base(fname, new TradeDecoder()) { }
     }
 
+    static async Task WriteManyAsync(string fname, double seconds) {
+      using (var writer = new TradeWriter(fname)) {
+        long records = 0;
+        DateTime start = DateTime.UtcNow;
+        while (true) {
+          DateTime now = DateTime.UtcNow;
+          await writer.Write(new Tick<Trade>(now, new Trade(1, 1)));
+          ++records;
+          if (now >= start + TimeSpan.FromSeconds(seconds)) break;
+        }
+        await writer.FlushAsync(flushToDisk: false);
+        seconds = (DateTime.UtcNow - start).TotalSeconds;
+        long bytes = new FileInfo(fname).Length;
+        Console.WriteLine("{0:N2} records/sec, {1:N2} bytes/sec", records / seconds, bytes / seconds);
+      }
+    }
+
+    [TestMethod]
+    public void Benchmark() {
+      const double Seconds = 10;
+      string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+      try {
+        WriteManyAsync(fname, Seconds).Wait();
+      } finally {
+        if (File.Exists(fname)) File.Delete(fname);
+      }
+    }
+
     [TestMethod]
     public void ReadWriteTrades() {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

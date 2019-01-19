@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  struct Tick<T> {
+  public struct Tick<T> {
     public Tick(DateTime timestamp, T value) {
       Timestamp = timestamp;
       Value = value;
@@ -17,7 +17,7 @@ namespace ChunkIO {
     public T Value { get; }
   }
 
-  abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>> {
+  public abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>> {
     BinaryWriter _writer = null;
 
     public void Dispose() => Dispose(true);
@@ -47,7 +47,7 @@ namespace ChunkIO {
     }
   }
 
-  abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>> {
+  public abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>> {
     BinaryReader _reader = null;
 
     public void Dispose() => Dispose(true);

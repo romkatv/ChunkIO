@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChunkIO.Test", "ChunkIO.Tes
 		{E2D6632D-F95F-4C15-B27B-496450926590} = {E2D6632D-F95F-4C15-B27B-496450926590}
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmark", "Benchmark\Benchmark.csproj", "{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,6 +26,10 @@ Global
 		{0E76E245-95FA-47CC-A759-55DD61A55F4E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0E76E245-95FA-47CC-A759-55DD61A55F4E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0E76E245-95FA-47CC-A759-55DD61A55F4E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77CFEA4A-EAAF-419F-8D12-F56CB887CA4D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
