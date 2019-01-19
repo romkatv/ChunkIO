@@ -50,7 +50,7 @@
     <Compile Include="Compression.cs" />
     <Compile Include="Encoding.cs" />
     <Compile Include="SipHash.cs" />
-    <Compile Include="Tick.cs" />
+    <Compile Include="Event.cs" />
     <Compile Include="TimeSeries.cs" />
     <Compile Include="UserData.cs" />
     <Compile Include="ChunkReader.cs" />

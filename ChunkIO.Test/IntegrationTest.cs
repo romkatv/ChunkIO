@@ -20,24 +20,24 @@ namespace ChunkIO.Test {
       public decimal Size { get; }
     }
 
-    class TradeEncoder : TickEncoder<Trade> {
+    class TradeEncoder : EventEncoder<Trade> {
       protected override void Encode(BinaryWriter writer, Trade trade, bool isPrimary) {
         writer.Write(trade.Price);
         writer.Write(trade.Size);
       }
     }
 
-    class TradeDecoder : TickDecoder<Trade> {
+    class TradeDecoder : EventDecoder<Trade> {
       protected override Trade Decode(BinaryReader reader, bool isPrimary) {
         return new Trade(price: reader.ReadDecimal(), size: reader.ReadDecimal());
       }
     }
 
-    class TradeWriter : TimeSeriesWriter<Tick<Trade>> {
+    class TradeWriter : TimeSeriesWriter<Event<Trade>> {
       public TradeWriter(string fname) : base(fname, new TradeEncoder()) { }
     }
 
-    class TradeReader : TimeSeriesReader<Tick<Trade>> {
+    class TradeReader : TimeSeriesReader<Event<Trade>> {
       public TradeReader(string fname) : base(fname, new TradeDecoder()) { }
     }
 
@@ -47,7 +47,7 @@ namespace ChunkIO.Test {
         DateTime start = DateTime.UtcNow;
         while (true) {
           DateTime now = DateTime.UtcNow;
-          await writer.Write(new Tick<Trade>(now, new Trade(1, 1)));
+          await writer.Write(new Event<Trade>(now, new Trade(1, 1)));
           ++records;
           if (now >= start + TimeSpan.FromSeconds(seconds)) break;
         }
@@ -77,25 +77,25 @@ namespace ChunkIO.Test {
           for (int i = 0; i != 2; ++i) {
             var t = new DateTime(i + 1, DateTimeKind.Utc);
             var trade = new Trade(price: 10 * (i + 1), size: 100 * (i + 1));
-            writer.Write(new Tick<Trade>(t, trade)).Wait();
+            writer.Write(new Event<Trade>(t, trade)).Wait();
           }
           using (var reader = new TradeReader(fname)) {
             Assert.IsTrue(reader.FlushRemoteWriterAsync(flushToDisk: false).Result);
             // Production code should probably avoid materializing all data like we do here.
             // Instead, it should either iterate over the result of Sync() or -- even better --
             // use ForEachAsync() instead of Sync().
-            Tick<Trade>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+            Event<Trade>[][] chunks = reader.ReadAllAfter(new DateTime(0))
                 .Sync()
                 .Select(c => c.ToArray())
                 .ToArray();
             Assert.AreEqual(1, chunks.Length);
-            Tick<Trade>[] ticks = chunks[0].ToArray();
-            Assert.AreEqual(2, ticks.Length);
-            for (int i = 0; i != ticks.Length; ++i) {
-              Tick<Trade> tick = ticks[i];
-              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), tick.Timestamp);
-              Assert.AreEqual(10 * (i + 1), tick.Value.Price);
-              Assert.AreEqual(100 * (i + 1), tick.Value.Size);
+            Event<Trade>[] events = chunks[0].ToArray();
+            Assert.AreEqual(2, events.Length);
+            for (int i = 0; i != events.Length; ++i) {
+              Event<Trade> e = events[i];
+              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), e.Timestamp);
+              Assert.AreEqual(10 * (i + 1), e.Value.Price);
+              Assert.AreEqual(100 * (i + 1), e.Value.Size);
             }
           }
         }
@@ -144,7 +144,7 @@ namespace ChunkIO.Test {
       }
     }
 
-    class OrderBookPatchEncoder : TickEncoder<PriceLevel[]> {
+    class OrderBookPatchEncoder : EventEncoder<PriceLevel[]> {
       readonly OrderBook _book = new OrderBook();
 
       protected override void Encode(BinaryWriter writer, PriceLevel[] levels, bool isPrimary) {
@@ -158,7 +158,7 @@ namespace ChunkIO.Test {
       }
     }
 
-    class OrderBookUpdateDecoder : TickDecoder<OrderBookUpdate> {
+    class OrderBookUpdateDecoder : EventDecoder<OrderBookUpdate> {
       protected override OrderBookUpdate Decode(BinaryReader reader, bool isPrimary) {
         var res = new OrderBookUpdate(isSnapshot: isPrimary, lvls: new PriceLevel[reader.ReadInt32()]);
         for (int i = 0; i != res.PriceLevels.Length; ++i) {
@@ -168,11 +168,11 @@ namespace ChunkIO.Test {
       }
     }
 
-    class OrderBookWriter : TimeSeriesWriter<Tick<PriceLevel[]>> {
+    class OrderBookWriter : TimeSeriesWriter<Event<PriceLevel[]>> {
       public OrderBookWriter(string fname) : base(fname, new OrderBookPatchEncoder()) { }
     }
 
-    class OrderBookReader : TimeSeriesReader<Tick<OrderBookUpdate>> {
+    class OrderBookReader : TimeSeriesReader<Event<OrderBookUpdate>> {
       public OrderBookReader(string fname) : base(fname, new OrderBookUpdateDecoder()) { }
     }
 
@@ -184,24 +184,24 @@ namespace ChunkIO.Test {
           for (int i = 0; i != 2; ++i) {
             var t = new DateTime(i + 1, DateTimeKind.Utc);
             var lvl = new PriceLevel(price: 10 * (i + 1), size: 100 * (i + 1));
-            writer.Write(new Tick<PriceLevel[]>(t, new[] { lvl })).Wait();
+            writer.Write(new Event<PriceLevel[]>(t, new[] { lvl })).Wait();
           }
           using (var reader = new OrderBookReader(fname)) {
             reader.FlushRemoteWriterAsync(flushToDisk: false).Wait();
-            Tick<OrderBookUpdate>[][] chunks = reader.ReadAllAfter(new DateTime(0))
+            Event<OrderBookUpdate>[][] chunks = reader.ReadAllAfter(new DateTime(0))
                 .Sync()
                 .Select(c => c.ToArray())
                 .ToArray();
             Assert.AreEqual(1, chunks.Length);
-            Tick<OrderBookUpdate>[] ticks = chunks[0].ToArray();
-            Assert.AreEqual(2, ticks.Length);
-            for (int i = 0; i != ticks.Length; ++i) {
-              Tick<OrderBookUpdate> tick = ticks[i];
-              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), tick.Timestamp);
-              Assert.AreEqual(i == 0, tick.Value.IsSnapshot);
-              Assert.AreEqual(1, tick.Value.PriceLevels.Length);
-              Assert.AreEqual(10 * (i + 1), tick.Value.PriceLevels[0].Price);
-              Assert.AreEqual(100 * (i + 1), tick.Value.PriceLevels[0].Size);
+            Event<OrderBookUpdate>[] events = chunks[0].ToArray();
+            Assert.AreEqual(2, events.Length);
+            for (int i = 0; i != events.Length; ++i) {
+              Event<OrderBookUpdate> e = events[i];
+              Assert.AreEqual(new DateTime(i + 1, DateTimeKind.Utc), e.Timestamp);
+              Assert.AreEqual(i == 0, e.Value.IsSnapshot);
+              Assert.AreEqual(1, e.Value.PriceLevels.Length);
+              Assert.AreEqual(10 * (i + 1), e.Value.PriceLevels[0].Price);
+              Assert.AreEqual(100 * (i + 1), e.Value.PriceLevels[0].Size);
             }
           }
         }

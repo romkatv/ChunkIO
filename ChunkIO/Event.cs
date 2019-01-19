@@ -6,8 +6,8 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  public struct Tick<T> {
-    public Tick(DateTime timestamp, T value) {
+  public struct Event<T> {
+    public Event(DateTime timestamp, T value) {
       Timestamp = timestamp;
       Value = value;
     }
@@ -17,7 +17,7 @@ namespace ChunkIO {
     public T Value { get; }
   }
 
-  public abstract class TickEncoder<T> : ITimeSeriesEncoder<Tick<T>> {
+  public abstract class EventEncoder<T> : ITimeSeriesEncoder<Event<T>> {
     BinaryWriter _writer = null;
 
     public void Dispose() => Dispose(true);
@@ -26,16 +26,16 @@ namespace ChunkIO {
       if (disposing) _writer?.Dispose();
     }
 
-    public DateTime EncodePrimary(Stream strm, Tick<T> tick) {
+    public DateTime EncodePrimary(Stream strm, Event<T> e) {
       RefreshWriter(strm);
-      Encode(_writer, tick.Value, isPrimary: true);
-      return tick.Timestamp;
+      Encode(_writer, e.Value, isPrimary: true);
+      return e.Timestamp;
     }
 
-    public void EncodeSecondary(Stream strm, Tick<T> tick) {
+    public void EncodeSecondary(Stream strm, Event<T> e) {
       RefreshWriter(strm);
-      _writer.Write(tick.Timestamp.ToUniversalTime().Ticks);
-      Encode(_writer, tick.Value, isPrimary: false);
+      _writer.Write(e.Timestamp.ToUniversalTime().Ticks);
+      Encode(_writer, e.Value, isPrimary: false);
     }
 
     protected abstract void Encode(BinaryWriter writer, T val, bool isPrimary);
@@ -47,7 +47,7 @@ namespace ChunkIO {
     }
   }
 
-  public abstract class TickDecoder<T> : ITimeSeriesDecoder<Tick<T>> {
+  public abstract class EventDecoder<T> : ITimeSeriesDecoder<Event<T>> {
     BinaryReader _reader = null;
 
     public void Dispose() => Dispose(true);
@@ -56,21 +56,21 @@ namespace ChunkIO {
       if (disposing) _reader?.Dispose();
     }
 
-    public void DecodePrimary(Stream strm, DateTime t, out Tick<T> val) {
+    public void DecodePrimary(Stream strm, DateTime t, out Event<T> val) {
       RefreshReader(strm);
-      val = new Tick<T>(t, Decode(_reader, isPrimary: true));
+      val = new Event<T>(t, Decode(_reader, isPrimary: true));
     }
 
-    public bool DecodeSecondary(Stream strm, out Tick<T> val) {
+    public bool DecodeSecondary(Stream strm, out Event<T> val) {
       RefreshReader(strm);
       // This check assumes that BinaryReader has no internal buffer, which is true as of Jan 2019 but
       // it's not guaranteed to stay that way. BinaryReader has PeekChar() but no PeekByte(), even though
       // the latter would be trivial to implement and would fit the API better.
       if (strm.Position == strm.Length) {
-        val = default(Tick<T>);
+        val = default(Event<T>);
         return false;
       }
-      val = new Tick<T>(new DateTime(_reader.ReadInt64(), DateTimeKind.Utc), Decode(_reader, isPrimary: false));
+      val = new Event<T>(new DateTime(_reader.ReadInt64(), DateTimeKind.Utc), Decode(_reader, isPrimary: false));
       return true;
     }
 

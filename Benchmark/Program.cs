@@ -9,19 +9,19 @@ using System.Threading.Tasks;
 namespace ChunkIO.Benchmark {
   struct Empty { }
 
-  class EmptyEncoder : TickEncoder<Empty> {
+  class EmptyEncoder : EventEncoder<Empty> {
     protected override void Encode(BinaryWriter writer, Empty trade, bool isPrimary) { }
   }
 
-  class EmptyDecoder : TickDecoder<Empty> {
+  class EmptyDecoder : EventDecoder<Empty> {
     protected override Empty Decode(BinaryReader reader, bool isPrimary) => new Empty();
   }
 
-  class EmptyWriter : TimeSeriesWriter<Tick<Empty>> {
+  class EmptyWriter : TimeSeriesWriter<Event<Empty>> {
     public EmptyWriter(string fname) : base(fname, new EmptyEncoder()) { }
   }
 
-  class EmptyReader : TimeSeriesReader<Tick<Empty>> {
+  class EmptyReader : TimeSeriesReader<Event<Empty>> {
     public EmptyReader(string fname) : base(fname, new EmptyDecoder()) { }
   }
 
@@ -36,7 +36,7 @@ namespace ChunkIO.Benchmark {
         do {
           for (int i = 0; i != 256; ++i) {
             ++records;
-            await writer.Write(new Tick<Empty>(new DateTime(records, DateTimeKind.Utc), new Empty()));
+            await writer.Write(new Event<Empty>(new DateTime(records, DateTimeKind.Utc), new Empty()));
           }
         } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
         await writer.FlushAsync(flushToDisk: false);
@@ -53,7 +53,7 @@ namespace ChunkIO.Benchmark {
       using (var reader = new EmptyReader(fname)) {
         long records = 0;
         DateTime start = DateTime.UtcNow;
-        await reader.ReadAllAfter(DateTime.MinValue).ForEachAsync((IEnumerable<Tick<Empty>> buf) => {
+        await reader.ReadAllAfter(DateTime.MinValue).ForEachAsync((IEnumerable<Event<Empty>> buf) => {
           records += buf.Count();
           return Task.CompletedTask;
         });
