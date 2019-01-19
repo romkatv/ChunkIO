@@ -7,7 +7,7 @@ using System.IO.Compression;
 using System.IO;
 
 namespace ChunkIO {
-  public static class Compression {
+  static class Compression {
     public static ArraySegment<byte> Compress(byte[] array, int offset, int count, CompressionLevel lvl) {
       using (var output = new MemoryStream(count / 4)) {
         using (var deflate = new DeflateStream(output, lvl, leaveOpen: true)) {
