@@ -16,7 +16,11 @@ namespace ChunkIO {
     //   * false if there is no listener associated with the file.
     //   * true if there is a listener and the file was successfully flushed.
     //
-    // Throws in all other cases.
+    // Throws in all other cases. For example:
+    //
+    //   * The remote writer failed to flush because disk is full.
+    //   * The remote writer sent invalid response to our request.
+    //   * Pipe permission error.
     public static async Task<bool> FlushAsync(string fname, bool flushToDisk) {
       if (fname == null) throw new ArgumentNullException(nameof(fname));
       while (true) {
@@ -74,7 +78,7 @@ namespace ChunkIO {
       public Listener(string fname, Func<bool, Task> flush) {
         _srv = RunPipeServer(PipeNameFromFile(fname), 4, _cancel.Token, async (Stream strm, CancellationToken c) => {
           var buf = new byte[1];
-          // Comments in FlushAsync() explanation why there may be no data in the stream.
+          // Comments in FlushAsync() explanain why there may be no data in the stream.
           if (await strm.ReadAsync(buf, 0, 1, c) != 1) return;
           if (buf[0] != 0 && buf[0] != 1) throw new Exception("Invalid Flush request");
           bool flushToDisk = buf[0] == 1;
@@ -99,6 +103,16 @@ namespace ChunkIO {
         }
       }
 
+      // Generic multi-threaded named pipe server. It keeps the specified number of "free"
+      // instances that are listening for incoming connections. The total number of instances
+      // never exceeds 254, which may or may not be the limit imposed by dotnet or win32 API.
+      // The docs are confusing on this matter.
+      //
+      // Signalling via the cancellation token will cancel all outstanding instances (both free
+      // and active) and stop the listening loop. Only after that the task will complete.
+      //
+      // The pipe is created during the initial synchronous part of the method. Thus, when
+      // RunPipeServer() returns its task, the pipe already exists.
       public static async Task RunPipeServer(string name, int freeInstances, CancellationToken cancel,
                                              Func<Stream, CancellationToken, Task> handler) {
         const int MaxNamedPipeServerInstances = 254;
