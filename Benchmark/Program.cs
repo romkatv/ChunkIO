@@ -42,7 +42,7 @@ namespace ChunkIO.Benchmark {
         await writer.FlushAsync(flushToDisk: false);
         seconds = (DateTime.UtcNow - start).TotalSeconds;
         long bytes = new FileInfo(fname).Length;
-        Console.WriteLine("WriteMany: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec",
+        Console.WriteLine("WriteMany: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
         return records;
       }
@@ -59,7 +59,7 @@ namespace ChunkIO.Benchmark {
         });
         double seconds = (DateTime.UtcNow - start).TotalSeconds;
         long bytes = new FileInfo(fname).Length;
-        Console.WriteLine("ReadAll: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec",
+        Console.WriteLine("ReadAll: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
         return records;
       }
@@ -79,15 +79,15 @@ namespace ChunkIO.Benchmark {
           await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
         } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
         seconds = (DateTime.UtcNow - start).TotalSeconds;
-        Console.WriteLine("SeekMany: {0:N} seeks, {1:N1} seeks/sec", seeks, seeks / seconds);
+        Console.WriteLine("SeekMany: {0:N} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
       }
     }
 
     // Sample run on Intel Core i9-7900X with M.2 SSD:
     //
-    //   WriteMany: 17,090,816.00 records, 25,994,933.00 bytes, 569,402.99 records/sec, 866,055.34 bytes/sec
-    //   ReadAll: 17,090,816.00 records, 25,994,933.00 bytes, 3,804,831.91 records/sec, 5,787,105.22 bytes/sec
-    //   SeekMany: 2,103.00 seeks, 210.3 seeks/sec
+    //   WriteMany: 17,090,816.00 records, 25,994,933.00 bytes, 569,402.99 records/sec, 866,055.34 bytes/sec.
+    //   ReadAll: 17,090,816.00 records, 25,994,933.00 bytes, 3,804,831.91 records/sec, 5,787,105.22 bytes/sec.
+    //   SeekMany: 2,103.00 seeks, 210.3 seeks/sec.
     static async Task RunBenchmarks() {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
       try {
