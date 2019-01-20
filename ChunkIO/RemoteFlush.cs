@@ -41,11 +41,14 @@ namespace ChunkIO {
         using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
                                                     PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
           // NamedPipeClientStream has awful API. It doesn't allow us to bail early if there is no pipe and
-          // to wait indefinitely if there is. So we do it manually with a file existence check and a loop.
-          // Unfortunately, this existence check has a side effect of creating a client pipe connection.
-          // This is why our server has to handle connections that don't write any data.
+          // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
+          // a file existence check and a loop. Unfortunately, this existence check has a side effect of
+          // creating a client pipe connection. This is why our server has to handle connections that don't
+          // write any data.
           if (!File.Exists(@"\\.\pipe\" + PipeNameFromFile(fname))) return false;
           try {
+            // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
+            // we have verified its existence and our attempt to connect to it.
             await pipe.ConnectAsync(1000);
           } catch (TimeoutException) {
             continue;
@@ -85,15 +88,13 @@ namespace ChunkIO {
     }
 
     sealed class Listener : IDisposable {
-      readonly CancellationTokenSource _cancel = new CancellationTokenSource();
-      readonly Task _srv;
-      bool _disposed = false;
+      readonly PipeServer _srv;
 
       public Listener(string fname, Func<bool, Task> flush) {
-        _srv = RunPipeServer(PipeNameFromFile(fname), 4, _cancel.Token, async (Stream strm, CancellationToken c) => {
+        _srv = new PipeServer(PipeNameFromFile(fname), 4, async (Stream strm, CancellationToken cancel) => {
           var buf = new byte[1];
-          // Comments in FlushAsync() explanain why there may be no data in the stream.
-          if (await strm.ReadAsync(buf, 0, 1, c) != 1) return;
+          // Comments in RemoteFlush.FlushAsync() explanain why there may be no data in the stream.
+          if (await strm.ReadAsync(buf, 0, 1, cancel) != 1) return;
           if (buf[0] != 0 && buf[0] != 1) throw new Exception("Invalid Flush request");
           bool flushToDisk = buf[0] == 1;
           try {
@@ -102,116 +103,11 @@ namespace ChunkIO {
           } catch {
             buf[0] = 0;
           }
-          await strm.WriteAsync(buf, 0, 1, c);
+          await strm.WriteAsync(buf, 0, 1, cancel);
         });
       }
 
-      public void Dispose() {
-        if (_disposed) return;
-        _disposed = true;
-        _cancel.Cancel();
-        try {
-          _srv.Wait();
-        } finally {
-          _cancel.Dispose();
-        }
-      }
-
-      // Generic multi-threaded named pipe server. It keeps the specified number of "free"
-      // instances that are listening for incoming connections. The total number of instances
-      // never exceeds 254, which may or may not be the limit imposed by dotnet or win32 API.
-      // The docs are confusing on this matter.
-      //
-      // Signalling via the cancellation token will cancel all outstanding instances (both free
-      // and active) and stop the listening loop. Only after that the task will complete.
-      //
-      // The pipe is created during the initial synchronous part of the method. Thus, when
-      // RunPipeServer() returns its task, the pipe already exists.
-      public static async Task RunPipeServer(string name, int freeInstances, CancellationToken cancel,
-                                             Func<Stream, CancellationToken, Task> handler) {
-        const int MaxNamedPipeServerInstances = 254;
-        if (name == null) throw new ArgumentNullException(nameof(name));
-        if (name == "" || name.Contains(':')) throw new ArgumentException($"Invalid name: {name}");
-        if (handler == null) throw new ArgumentNullException(nameof(handler));
-        if (freeInstances <= 0 || freeInstances > MaxNamedPipeServerInstances) {
-          throw new ArgumentException($"Invalid number of free instances: {freeInstances}");
-        }
-
-        var monitor = new object();
-        int free = 0;
-        int active = 0;
-        Task wake = null;
-
-        try {
-          while (true) {
-            int start;
-            lock (monitor) {
-              Debug.Assert(free >= 0 && free <= freeInstances);
-              Debug.Assert(active >= 0 && free + active <= MaxNamedPipeServerInstances);
-              start = Math.Min(freeInstances - free, MaxNamedPipeServerInstances - free - active);
-              free += start;
-              wake = new Task(delegate { }, cancel);
-            }
-            Debug.Assert(start >= 0);
-            while (start-- > 0) {
-              Task _ = RunServer();
-            }
-            await wake;
-          }
-        } catch {
-          if (!cancel.IsCancellationRequested) throw;
-          while (true) {
-            lock (monitor) {
-              if (free == 0 && active == 0) break;
-              wake = new Task(delegate { });
-            }
-            await wake;
-          }
-        }
-
-        void Update(Action update) {
-          lock (monitor) {
-            update.Invoke();
-            if (wake.Status == TaskStatus.Created) wake.Start();
-          }
-        }
-
-        async Task RunServer() {
-          NamedPipeServerStream srv = null;
-          bool connected = false;
-          try {
-            srv = new NamedPipeServerStream(
-                pipeName: name,
-                direction: PipeDirection.InOut,
-                maxNumberOfServerInstances: NamedPipeServerStream.MaxAllowedServerInstances,
-                transmissionMode: PipeTransmissionMode.Byte,
-                options: PipeOptions.Asynchronous | PipeOptions.WriteThrough,
-                inBufferSize: 0,
-                outBufferSize: 0);
-            await srv.WaitForConnectionAsync(cancel);
-            connected = true;
-            Update(() => {
-              --free;
-              ++active;
-            });
-            await handler.Invoke(srv, cancel);
-          } finally {
-            if (connected) {
-              try { srv.Disconnect(); } catch { }
-            }
-            if (srv != null) {
-              try { srv.Dispose(); } catch { }
-            }
-            Update(() => {
-              if (connected) {
-                --active;
-              } else {
-                --free;
-              }
-            });
-          }
-        }
-      }
+      public void Dispose() => _srv.Dispose();
     }
   }
 }
