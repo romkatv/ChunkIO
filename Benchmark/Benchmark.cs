@@ -19,6 +19,16 @@ namespace ChunkIO.Benchmark {
 
   class EmptyWriter : TimeSeriesWriter<Event<Empty>> {
     public EmptyWriter(string fname) : base(fname, new EmptyEncoder()) { }
+
+    static WriterOptions Opt() {
+      // Set all time-based triggers because this is what production code normally does.
+      // Use large values that won't actually cause any flushes.
+      var opt = new WriterOptions();
+      opt.CloseChunk.Age = TimeSpan.FromDays(1);
+      opt.FlushToOS.Age = TimeSpan.FromDays(1);
+      opt.FlushToDisk.Age = TimeSpan.FromDays(1);
+      return opt;
+    }
   }
 
   class EmptyReader : TimeSeriesReader<Event<Empty>> {
