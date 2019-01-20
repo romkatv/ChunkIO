@@ -113,7 +113,7 @@ namespace ChunkIO {
             await wake;
           }
         } catch (Exception e) {
-          bool ok = _cancel.IsCancellationRequested;
+          bool ok = _cancel.IsCancellationRequested && e is TaskCanceledException;
           _cancel.Cancel();
           while (true) {
             lock (monitor) {
@@ -122,8 +122,7 @@ namespace ChunkIO {
             }
             await wake;
           }
-          if (ok && e is TaskCanceledException) return;
-          throw;
+          if (!ok) throw;
         }
       }
     }
