@@ -44,7 +44,9 @@ namespace ChunkIO {
         m = MeterBefore(meter.Value.ChunkBeginPosition);
         to = meter.Value.ChunkBeginPosition;
       }
-      return null;
+      // This last scan is for the case where all meters are corrupted but we still can get to the
+      // desired file position by iterating over chunks.
+      return from < to ? await Scan(_last <= from ? _last : 0) : null;
 
       async Task<IChunk> Scan(long h) {
         ChunkHeader? res = null;
