@@ -35,7 +35,11 @@ namespace ChunkIO {
 
     public string Name => _file.Name;
     public long Length => _file.Length;
-    public void Seek(long position) => _file.Seek(position, SeekOrigin.Begin);
+    public void Seek(long position) {
+      if (_file.Seek(position, SeekOrigin.Begin) != position) {
+        throw new IOException($"Cannot seek to {position}");
+      }
+    }
     public Task<int> ReadAsync(byte[] array, int offset, int count) => _file.ReadAsync(array, offset, count);
     public void Dispose() => _file.Dispose();
   }
