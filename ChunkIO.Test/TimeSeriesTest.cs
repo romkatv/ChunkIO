@@ -8,6 +8,22 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ChunkIO.Test {
+  public static class EnumerableExtension {
+    public static IEnumerable<T> RandomShuffled<T>(this IEnumerable<T> seq, int seed) {
+      T[] res = seq.ToArray();
+      var rng = new Random(seed);
+      int n = res.Length;
+      while (n > 1) {
+        n--;
+        int k = rng.Next(n + 1);
+        T value = res[k];
+        res[k] = res[n];
+        res[n] = value;
+      }
+      return res;
+    }
+  }
+
   [TestClass]
   public class TimeSeriesTest {
     class Encoder : EventEncoder<long> {
@@ -130,7 +146,8 @@ namespace ChunkIO.Test {
           (64 << 10), (64 << 10) + 8, (64 << 10) + 16, (64 << 10) + 48, (64 << 10) + 56, (64 << 10) + 64,
           size - 1 - 64, size - 1 - 56, size - 1 - 48, size - 1 - 16, size - 1 - 8, size - 1
         };
-        foreach (long p in pos.Where(x => x >= 0 && x < size).Distinct()) {
+        int seed = (int)Stopwatch.GetTimestamp();
+        foreach (long p in pos.Where(x => x >= 0 && x < size).Distinct().RandomShuffled(seed)) {
           var buf = new byte[1];
           file.Seek(p, SeekOrigin.Begin);
           Assert.AreEqual(1, await file.ReadAsync(buf, 0, 1));
