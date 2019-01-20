@@ -25,7 +25,7 @@ namespace ChunkIO.Test {
     }
 
     class Writer : TimeSeriesWriter<Event<long>> {
-      public Writer(string fname) : base(fname, new Encoder(), new ChunkIO.WriterOptions() { CloseChunk = null }) { }
+      public Writer(string fname) : base(fname, new Encoder(), new WriterOptions() { CloseChunk = null }) { }
     }
 
     class Reader : TimeSeriesReader<Event<long>> {
@@ -54,7 +54,15 @@ namespace ChunkIO.Test {
       public long Last { get; set; }
     }
 
-    static async Task<ReadStats> ReadAllAfter(string fname, long after, long bufRecs, bool pristine) {
+    [Flags]
+    enum FileState {
+      Pristine = 0,
+      Corrupted = 1 << 0,
+      Truncated = 1 << 1,
+      Expanding = Corrupted | 1 << 2,
+    }
+
+    static async Task<ReadStats> ReadAllAfter(string fname, long after, long bufRecs, FileState state) {
       using (var reader = new Reader(fname)) {
         var stats = new ReadStats();
         long lastLen = -1;
@@ -68,11 +76,12 @@ namespace ChunkIO.Test {
           Assert.AreNotEqual(0, events.Length);
           Assert.IsTrue(events.Length <= bufRecs);
           Assert.IsTrue(events[0].Value > stats.Last);
+          Assert.IsTrue((events[0].Value - 1) % bufRecs == 0);
           if (stats.First == 0) {
             stats.First = events.First().Value;
           } else {
             Assert.AreEqual(bufRecs, lastLen);
-            if (pristine) Assert.IsTrue(events.First().Value > after);
+            if (!state.HasFlag(FileState.Expanding)) Assert.IsTrue(events.First().Value > after);
           }
           stats.Last = events.Last().Value;
           stats.Total += events.Length;
@@ -83,7 +92,7 @@ namespace ChunkIO.Test {
       }
     }
 
-    async Task VerifyFile(string fname, long n, long bufRecs, bool pristine) {
+    async Task VerifyFile(string fname, long n, long bufRecs, FileState state) {
       Debug.Assert(n >= 0);
       Debug.Assert(bufRecs > 0);
       var pos = new[] {
@@ -95,11 +104,16 @@ namespace ChunkIO.Test {
           n - 2, n - 1, n, n + 1, n + 2
         };
       foreach (long after in pos.Where(p => p >= 0).Distinct()) {
-        ReadStats stats = await ReadAllAfter(fname, after, bufRecs, pristine);
+        ReadStats stats = await ReadAllAfter(fname, after, bufRecs, state);
         Assert.IsTrue(stats.Last <= n);
-        if (pristine) {
+        if (!state.HasFlag(FileState.Corrupted) && stats.Total > 0) {
+          long start = Math.Max(0, Math.Min(n, after) - 1) / bufRecs * bufRecs + 1;
+          Assert.IsTrue(stats.First <= start);
+          if (!state.HasFlag(FileState.Truncated)) Assert.AreEqual(start, stats.First);
+          Assert.AreEqual(stats.Total, stats.Last - stats.First + 1);
+        }
+        if (state == FileState.Pristine) {
           Assert.AreEqual(n, stats.Last);
-          Assert.IsTrue(stats.First <= Math.Max(1, after));
           if (n > 0 && after <= 1) {
             Assert.AreEqual(n, stats.Total);
             Assert.AreEqual(1, stats.First);
@@ -124,7 +138,7 @@ namespace ChunkIO.Test {
           file.Seek(p, SeekOrigin.Begin);
           await file.WriteAsync(buf, 0, 1);
           await file.FlushAsync();
-          await VerifyFile(fname, n, bufRecs, pristine: false);
+          await VerifyFile(fname, n, bufRecs, FileState.Corrupted);
         }
       }
     }
@@ -140,7 +154,7 @@ namespace ChunkIO.Test {
         foreach (long p in pos.Where(x => x >= 0 && x < size).Distinct().OrderByDescending(x => x)) {
           file.SetLength(p);
           Debug.Assert(new FileInfo(fname).Length == p);
-          await VerifyFile(fname, n, bufRecs, pristine: false);
+          await VerifyFile(fname, n, bufRecs, FileState.Truncated);
         }
       }
     }
@@ -174,7 +188,7 @@ namespace ChunkIO.Test {
 
         async Task TestPristine(string fname) {
           await Write(fname, 1, n, bufRecs);
-          await VerifyFile(fname, n, bufRecs, pristine: true);
+          await VerifyFile(fname, n, bufRecs, FileState.Pristine);
         }
 
         async Task TestCorruption(string fname) {
@@ -191,13 +205,13 @@ namespace ChunkIO.Test {
           long half = (n / 2) / bufRecs * bufRecs;
           await Write(fname, 1, half, bufRecs);
           await Write(fname, 1 + half, n - half, bufRecs);
-          await VerifyFile(fname, n, bufRecs, pristine: true);
+          await VerifyFile(fname, n, bufRecs, FileState.Pristine);
         }
 
         async Task TestConcurrent(string fname) {
           Task w = Write(fname, 1, n, bufRecs);
           while (!w.IsCompleted) {
-            await VerifyFile(fname, n, bufRecs, pristine: false);
+            await VerifyFile(fname, n, bufRecs, FileState.Expanding);
           }
         }
       }
