@@ -77,7 +77,7 @@ namespace ChunkIO.Example {
     //
     // The defaults WriterOptions doesn't define any time-based triggers, so it's important to set
     // them manually. These options are recommended for production use.
-    public static WriterOptions Opt(string fname) {
+    static WriterOptions Opt(string fname) {
       // Guarantees:
       //
       //   * If the writer process terminates unexpectedly, we'll lose at most 1h+5m worth of data.
@@ -112,7 +112,7 @@ namespace ChunkIO.Example {
 
     // Writes a bunch of order books to the specified file.
     static async Task WriteOrderBooks(string fname) {
-      Console.WriteLine("Writing order books...");
+      Console.WriteLine("Writing order books into chunk #1");
       using (var writer = new OrderBookWriter(fname)) {
         // A helper function that prints to console everything we are writing.
         Task Write(Event<PriceLevel[]> e) {
@@ -139,7 +139,7 @@ namespace ChunkIO.Example {
 
         // Flush to close the current chunk to demonstrate how it affects the data
         // we'll read from the file later.
-        Console.WriteLine("Flushing and writing some more...");
+        Console.WriteLine("Writing order books into chunk #2");
         await writer.FlushAsync(flushToDisk: false);
         // Write one more patch. It will be encoded as a snapshot in the second chunk.
         await Write(new Event<PriceLevel[]>(T0 + TimeSpan.FromMinutes(3), new[] {
