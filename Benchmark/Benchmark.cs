@@ -52,7 +52,7 @@ namespace ChunkIO.Benchmark {
         await writer.FlushAsync(flushToDisk: false);
         seconds = (DateTime.UtcNow - start).TotalSeconds;
         long bytes = new FileInfo(fname).Length;
-        Console.WriteLine("WriteMany: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec.",
+        Console.WriteLine("WriteMany: {0:N0} records, {1:N0} bytes, {2:N0} records/sec, {3:N0} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
         return records;
       }
@@ -69,7 +69,7 @@ namespace ChunkIO.Benchmark {
         });
         double seconds = (DateTime.UtcNow - start).TotalSeconds;
         long bytes = new FileInfo(fname).Length;
-        Console.WriteLine("ReadAll: {0:N} records, {1:N} bytes, {2:N} records/sec, {3:N} bytes/sec.",
+        Console.WriteLine("ReadAll: {0:N0} records, {1:N0} bytes, {2:N0} records/sec, {3:N0} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
         return records;
       }
@@ -89,7 +89,7 @@ namespace ChunkIO.Benchmark {
           await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
         } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
         seconds = (DateTime.UtcNow - start).TotalSeconds;
-        Console.WriteLine("SeekMany: {0:N} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
+        Console.WriteLine("SeekMany: {0:N0} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
       }
     }
 

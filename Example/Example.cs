@@ -21,7 +21,7 @@ namespace ChunkIO.Example {
     public decimal Price { get; }
     public decimal Size { get; }
 
-    public override string ToString() => $"({(Price < 0 ? "sell" : "buy")} {Size} @ {Math.Abs(Price)})";
+    public override string ToString() => $"{(Price < 0 ? "sell" : "buy ")} {Size} @ {Math.Abs(Price)}";
   }
 
   // Helper class for building order books out of patches.
@@ -105,10 +105,9 @@ namespace ChunkIO.Example {
   }
 
   class Example {
-    static DateTime T0 { get; } = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    static  DateTime T0 { get; } = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public static string Print(PriceLevel[] lvl) => "[" + string.Join(", ", lvl) + "]";
-    public static string Print(Event<PriceLevel[]> e) => $"{e.Timestamp.ToString("HH:mm")} => {Print(e.Value)}";
+    static string Print(Event<PriceLevel[]> e) => $"{e.Timestamp:HH:mm} => {string.Join("; ", e.Value)}";
 
     // Writes a bunch of order books to the specified file.
     static async Task WriteOrderBooks(string fname) {
@@ -181,30 +180,30 @@ namespace ChunkIO.Example {
 
     // Sample output:
     //
-    //   Writing order books...
-    //     00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     00:02 => [(sell 4 @ 6)]
-    //   Flushing and writing some more...
-    //     00:03 => [(buy 0 @ 2), (sell 2 @ 6)]
+    //   Writing order books into chunk #1
+    //     00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
+    //     00:01 => buy  0 @ 3; buy  1 @ 4
+    //     00:02 => sell 4 @ 6
+    //   Writing order books into chunk #2
+    //     00:03 => buy  0 @ 2; sell 2 @ 6
     //
-    //   Reading order books starting from 0001-01-01 00:00:00
-    //     Snapshot: 00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     Patch   : 00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     Patch   : 00:02 => [(sell 4 @ 6)]
-    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //   Reading order books starting from 0001-01-01 00:00
+    //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
+    //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
+    //     Patch   : 00:02 => sell 4 @ 6
+    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
     //
-    //   Reading order books starting from 2000-01-01 00:00:02
-    //     Snapshot: 00:00 => [(buy 3 @ 2), (buy 1 @ 3), (sell 2 @ 5)]
-    //     Patch   : 00:01 => [(buy 0 @ 3), (buy 1 @ 4)]
-    //     Patch   : 00:02 => [(sell 4 @ 6)]
-    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //   Reading order books starting from 2000-01-01 00:02
+    //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
+    //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
+    //     Patch   : 00:02 => sell 4 @ 6
+    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
     //
-    //   Reading order books starting from 2000-01-01 00:00:03
-    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //   Reading order books starting from 2000-01-01 00:03
+    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
     //
-    //   Reading order books starting from 9999-12-31 23:59:59
-    //     Snapshot: 00:03 => [(sell 2 @ 6), (sell 2 @ 5), (buy 1 @ 4)]
+    //   Reading order books starting from 9999-12-31 23:59
+    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
     static int Main(string[] args) {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
       try {
