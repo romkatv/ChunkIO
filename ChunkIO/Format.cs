@@ -32,8 +32,7 @@ namespace ChunkIO {
         pos >= 0 &&
         ((ulong)pos + MeterInterval - 1) % MeterInterval >= Meter.Size;
 
-    public static bool IsValidPosition(ulong pos) =>
-        pos <= MaxPosition && IsValidPosition((long)pos);
+    public static bool IsValidPosition(ulong pos) => pos <= MaxPosition && IsValidPosition((long)pos);
 
     public static long? MeteredPosition(long begin, long offset) {
       if (!IsValidPosition(begin)) return null;
