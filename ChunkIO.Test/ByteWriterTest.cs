@@ -43,7 +43,7 @@ namespace ChunkIO.Test {
     [TestMethod]
     public void OneWrite() {
       using (var writer = new ByteWriter(_filepath)) {
-        var bytes = System.Text.Encoding.UTF8.GetBytes("<Hello>!");
+        var bytes = Encoding.UTF8.GetBytes("<Hello>!");
         writer.WriteAsync(bytes, 1, bytes.Length - 3);
         Assert.AreEqual(5, writer.Position);
         writer.FlushAsync(false).Wait();
@@ -56,7 +56,7 @@ namespace ChunkIO.Test {
     public void TwoWrites() {
       using (var writer = new ByteWriter(_filepath)) {
         void Write(string s) {
-          var bytes = System.Text.Encoding.UTF8.GetBytes(s);
+          var bytes = Encoding.UTF8.GetBytes(s);
           writer.WriteAsync(bytes, 0, bytes.Length);
           writer.FlushAsync(false).Wait();
         }
@@ -73,7 +73,7 @@ namespace ChunkIO.Test {
       File.WriteAllText(_filepath, "Hello");
       using (var writer = new ByteWriter(_filepath)) {
         Assert.AreEqual(5, writer.Position);
-        var bytes = System.Text.Encoding.UTF8.GetBytes("Goodbye");
+        var bytes = Encoding.UTF8.GetBytes("Goodbye");
         writer.WriteAsync(bytes, 0, bytes.Length);
         Assert.AreEqual(12, writer.Position);
         writer.FlushAsync(false).Wait();
@@ -97,7 +97,7 @@ namespace ChunkIO.Test {
       using (var file = new FileStream(_filepath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) {
         var bytes = new byte[file.Length];
         Assert.AreEqual(file.Read(bytes, 0, bytes.Length), bytes.Length);
-        return System.Text.Encoding.UTF8.GetString(bytes);
+        return Encoding.UTF8.GetString(bytes);
       }
     }
   }

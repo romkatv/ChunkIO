@@ -20,6 +20,32 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
+  static class UInt64LE {
+    public const int Size = 8;
+
+    public static void Write(byte[] array, ref int offset, ulong val) {
+      array[offset++] = (byte)(val >> 0);
+      array[offset++] = (byte)(val >> 8);
+      array[offset++] = (byte)(val >> 16);
+      array[offset++] = (byte)(val >> 24);
+      array[offset++] = (byte)(val >> 32);
+      array[offset++] = (byte)(val >> 40);
+      array[offset++] = (byte)(val >> 48);
+      array[offset++] = (byte)(val >> 56);
+    }
+
+    public static ulong Read(byte[] array, ref int offset) {
+      return (ulong)array[offset++] << 0 |
+              (ulong)array[offset++] << 8 |
+              (ulong)array[offset++] << 16 |
+              (ulong)array[offset++] << 24 |
+              (ulong)array[offset++] << 32 |
+              (ulong)array[offset++] << 40 |
+              (ulong)array[offset++] << 48 |
+              (ulong)array[offset++] << 56;
+    }
+  }
+
   static class Format {
     public const int MaxContentLength = int.MaxValue;
     public const long MaxPosition = long.MaxValue;
@@ -49,13 +75,13 @@ namespace ChunkIO {
 
     public static bool VerifyHash(byte[] array, ref int offset) {
       ulong expected = SipHash.ComputeHash(array, 0, offset);
-      ulong actual = Encoding.UInt64.Read(array, ref offset);
+      ulong actual = UInt64LE.Read(array, ref offset);
       return expected == actual;
     }
   }
 
   struct ChunkHeader {
-    public const int Size = UserData.Size + 3 * Encoding.UInt64.Size;
+    public const int Size = UserData.Size + 3 * UInt64LE.Size;
 
     public UserData UserData { get; set; }
     public int ContentLength { get; set; }
@@ -66,19 +92,19 @@ namespace ChunkIO {
       Debug.Assert(Format.IsValidContentLength(ContentLength));
       int offset = 0;
       UserData.WriteTo(array, ref offset);
-      Encoding.UInt64.Write(array, ref offset, (ulong)ContentLength);
-      Encoding.UInt64.Write(array, ref offset, ContentHash);
-      Encoding.UInt64.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
+      UInt64LE.Write(array, ref offset, (ulong)ContentLength);
+      UInt64LE.Write(array, ref offset, ContentHash);
+      UInt64LE.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
     }
 
     public bool ReadFrom(byte[] array) {
       Debug.Assert(array.Length >= Size);
       int offset = 0;
       UserData = UserData.ReadFrom(array, ref offset);
-      ulong len = Encoding.UInt64.Read(array, ref offset);
+      ulong len = UInt64LE.Read(array, ref offset);
       if (!Format.IsValidContentLength(len)) return false;
       ContentLength = (int)len;
-      ContentHash = Encoding.UInt64.Read(array, ref offset);
+      ContentHash = UInt64LE.Read(array, ref offset);
       return Format.VerifyHash(array, ref offset);
     }
 
@@ -86,7 +112,7 @@ namespace ChunkIO {
   }
 
   struct Meter {
-    public const int Size = 2 * Encoding.UInt64.Size;
+    public const int Size = 2 * UInt64LE.Size;
 
     public long ChunkBeginPosition { get; set; }
 
@@ -94,14 +120,14 @@ namespace ChunkIO {
       Debug.Assert(array.Length >= Size);
       Debug.Assert(Format.IsValidPosition(ChunkBeginPosition));
       int offset = 0;
-      Encoding.UInt64.Write(array, ref offset, (ulong)ChunkBeginPosition);
-      Encoding.UInt64.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
+      UInt64LE.Write(array, ref offset, (ulong)ChunkBeginPosition);
+      UInt64LE.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
     }
 
     public bool ReadFrom(byte[] array) {
       Debug.Assert(array.Length >= Size);
       int offset = 0;
-      ulong pos = Encoding.UInt64.Read(array, ref offset);
+      ulong pos = UInt64LE.Read(array, ref offset);
       if (!Format.IsValidPosition(pos)) return false;
       ChunkBeginPosition = (long)pos;
       return Format.VerifyHash(array, ref offset);

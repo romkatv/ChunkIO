@@ -58,7 +58,7 @@ namespace ChunkIO {
     void RefreshWriter(Stream strm) {
       if (_writer != null && ReferenceEquals(strm, _writer.BaseStream)) return;
       _writer?.Dispose();
-      _writer = new BinaryWriter(strm, System.Text.Encoding.UTF8, leaveOpen: true);
+      _writer = new BinaryWriter(strm, Encoding.UTF8, leaveOpen: true);
     }
   }
 
@@ -96,7 +96,7 @@ namespace ChunkIO {
     void RefreshReader(Stream strm) {
       if (_reader != null && ReferenceEquals(strm, _reader.BaseStream)) return;
       _reader?.Dispose();
-      _reader = new BinaryReader(strm, System.Text.Encoding.UTF8, leaveOpen: true);
+      _reader = new BinaryReader(strm, Encoding.UTF8, leaveOpen: true);
     }
   }
 }

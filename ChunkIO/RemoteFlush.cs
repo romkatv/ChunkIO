@@ -83,7 +83,7 @@ namespace ChunkIO {
     static string PipeNameFromFile(string fname) {
       string id = "romkatv/chunkio:" + fname.ToLowerInvariant();
       using (var md5 = MD5.Create()) {
-        return HexLowerCase(md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(id)));
+        return HexLowerCase(md5.ComputeHash(Encoding.UTF8.GetBytes(id)));
       }
     }
 
