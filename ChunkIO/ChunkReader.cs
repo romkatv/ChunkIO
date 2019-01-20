@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-using static ChunkIO.Chunk;
+using static ChunkIO.Format;
 
 namespace ChunkIO {
   interface IChunk {

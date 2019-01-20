@@ -22,7 +22,7 @@ namespace ChunkIO {
       if (offset < 0 || count < 0 || array.Length - offset < count) {
         throw new Exception($"Invalid range for array of length {array.Length}: [{offset}, {offset} + {count})");
       }
-      if (count > Chunk.MaxContentLength) throw new Exception($"Record too big: {count}");
+      if (count > Format.MaxContentLength) throw new Exception($"Record too big: {count}");
       if (_torn) {
         await WritePadding();
         _torn = false;
@@ -53,20 +53,20 @@ namespace ChunkIO {
     public void Dispose() => _writer.Dispose();
 
     async Task WritePadding() {
-      int p = (int)(_writer.Position % Chunk.MeterInterval);
+      int p = (int)(_writer.Position % Format.MeterInterval);
       if (p == 0) return;
-      var padding = new byte[Chunk.MeterInterval - p];
+      var padding = new byte[Format.MeterInterval - p];
       await _writer.WriteAsync(padding, 0, padding.Length);
     }
 
     async Task WriteMetered(byte[] array, int offset, int count) {
       while (count > 0) {
-        int p = (int)(_writer.Position % Chunk.MeterInterval);
+        int p = (int)(_writer.Position % Format.MeterInterval);
         if (p == 0) {
           await _writer.WriteAsync(_meter, 0, _meter.Length);
           p += _meter.Length;
         }
-        int n = Math.Min(count, Chunk.MeterInterval - p);
+        int n = Math.Min(count, Format.MeterInterval - p);
         await _writer.WriteAsync(array, offset, n);
         offset += n;
         count -= n;

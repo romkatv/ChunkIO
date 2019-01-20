@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  static class Chunk {
+  static class Format {
     public const int MaxContentLength = int.MaxValue;
     public const long MaxPosition = long.MaxValue;
     public const int MeterInterval = 64 << 10;
@@ -50,7 +50,7 @@ namespace ChunkIO {
 
     public void WriteTo(byte[] array) {
       Debug.Assert(array.Length >= Size);
-      Debug.Assert(Chunk.IsValidContentLength(ContentLength));
+      Debug.Assert(Format.IsValidContentLength(ContentLength));
       int offset = 0;
       UserData.WriteTo(array, ref offset);
       Encoding.UInt64.Write(array, ref offset, (ulong)ContentLength);
@@ -63,13 +63,13 @@ namespace ChunkIO {
       int offset = 0;
       UserData = UserData.ReadFrom(array, ref offset);
       ulong len = Encoding.UInt64.Read(array, ref offset);
-      if (!Chunk.IsValidContentLength(len)) return false;
+      if (!Format.IsValidContentLength(len)) return false;
       ContentLength = (int)len;
       ContentHash = Encoding.UInt64.Read(array, ref offset);
-      return Chunk.VerifyHash(array, ref offset);
+      return Format.VerifyHash(array, ref offset);
     }
 
-    public long? EndPosition(long begin) => Chunk.MeteredPosition(begin, (long)ContentLength + Size);
+    public long? EndPosition(long begin) => Format.MeteredPosition(begin, (long)ContentLength + Size);
   }
 
   struct Meter {
@@ -79,7 +79,7 @@ namespace ChunkIO {
 
     public void WriteTo(byte[] array) {
       Debug.Assert(array.Length >= Size);
-      Debug.Assert(Chunk.IsValidPosition(ChunkBeginPosition));
+      Debug.Assert(Format.IsValidPosition(ChunkBeginPosition));
       int offset = 0;
       Encoding.UInt64.Write(array, ref offset, (ulong)ChunkBeginPosition);
       Encoding.UInt64.Write(array, ref offset, SipHash.ComputeHash(array, 0, offset));
@@ -89,9 +89,9 @@ namespace ChunkIO {
       Debug.Assert(array.Length >= Size);
       int offset = 0;
       ulong pos = Encoding.UInt64.Read(array, ref offset);
-      if (!Chunk.IsValidPosition(pos)) return false;
+      if (!Format.IsValidPosition(pos)) return false;
       ChunkBeginPosition = (long)pos;
-      return Chunk.VerifyHash(array, ref offset);
+      return Format.VerifyHash(array, ref offset);
     }
   }
 }
