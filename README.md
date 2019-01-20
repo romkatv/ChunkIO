@@ -25,10 +25,6 @@ No dependencies other than .NET Framework.
 
 Lightly tested (and heavily used in production) on Windows 10 with .NET Framework 4.7.2.
 
-## License
-
-Apache License 2.0. See [LICENSE](https://github.com/romkatv/ChunkIO/blob/master/LICENSE).
-
 ## File Format
 
 **Stability:** The file format may change without notice. No compatibility guarantees, neither forward nor backward, are provided.
@@ -92,3 +88,7 @@ Chunk header bytes:
 
   * Each record has a timestamp.
   * Records are encoded with `BinaryWriter` and decoded with `BinaryReader`.
+
+## License
+
+Apache License 2.0. See [LICENSE](https://github.com/romkatv/ChunkIO/blob/master/LICENSE).
