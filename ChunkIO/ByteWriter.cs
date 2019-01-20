@@ -37,7 +37,25 @@ namespace ChunkIO {
 
     public long Position => _file.Position;
     public Task WriteAsync(byte[] array, int offset, int count) => _file.WriteAsync(array, offset, count);
-    public Task FlushAsync(bool flushToDisk) => _file.FlushAsync();
+    public Task FlushAsync(bool flushToDisk) {
+      // The flush API in FileStream is fucked up:
+      //
+      //   * FileStream.Flush(flushToDisk) synchronously flushes to OS and then optionally synchronously
+      //     flushes to disk.
+      //   * FileStream.FlushAsync() synchronously flushes to OS and then asynchronously flushes to disk.
+      //
+      // To add insult to injury, when called without arguments, FileStream.Flush() doesn't flush to disk
+      // while FileStream.FlushAsync() does!
+      //
+      // Based on this API we implement ByteWriter.FlushAsync(flushToDisk) that synchronously flushes to OS
+      // and then optionally asynchronously flushes to disk. Not perfect but the best we can do.
+      if (flushToDisk) {
+        return _file.FlushAsync();
+      } else {
+        _file.Flush(flushToDisk: false);
+        return Task.CompletedTask;
+      }
+    }
 
     public void Dispose() => _file.Dispose();
   }
