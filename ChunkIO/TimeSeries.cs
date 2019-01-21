@@ -50,6 +50,7 @@ namespace ChunkIO {
   // Writer for timestamped records.
   public class TimeSeriesWriter<T> : IDisposable {
     readonly BufferedWriter _writer;
+    long _chunkRecords = 0;
 
     // The file must be exclusively writable. If it exists, it gets appended to.
     // You can use TimeSeriesReader to read the file. You can even do it while
@@ -78,14 +79,17 @@ namespace ChunkIO {
     // that should FlushAsync() succeed, the specified number of records will definitely have
     // appeared in the file.
     //
+    // RecordsWritten can change only during Write(). It can either go up by one, or down by any
+    // amount.
+    //
     // It's illegal to read RecordsWritten concurrently with Write() or with the task it returns.
     //
     // This field can be used to figure out whether the same record should be passed to Write() again
     // after an exception.
     //
     //   async Task WriteReliably(TimeSeriesWriter<T> writer, T record) {
-    //     long written = writer.RecordsWritten;
     //     while (true) {
+    //       long written = writer.RecordsWritten;
     //       try {
     //         await writer.Write(record);
     //         return;
@@ -123,6 +127,7 @@ namespace ChunkIO {
       IOutputChunk buf = await _writer.LockChunk();
       try {
         if (buf.IsNew) {
+          _chunkRecords = 0;
           buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
           // If the block is set up to automatically close after a certain number of bytes is
           // written, tell it to exclude snapshot bytes from the calculation. This is necessary
@@ -132,8 +137,11 @@ namespace ChunkIO {
         } else {
           Encoder.EncodeSecondary(buf.Stream, val);
         }
+        ++_chunkRecords;
         ++RecordsWritten;
       } catch {
+        RecordsWritten -= _chunkRecords;
+        _chunkRecords = 0;
         buf.Abandon();
         throw;
       } finally {
