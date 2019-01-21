@@ -168,7 +168,7 @@ namespace ChunkIO.Test {
           ++buf[0];
           file.Seek(p, SeekOrigin.Begin);
           await file.WriteAsync(buf, 0, 1);
-          await file.FlushAsync();
+          file.Flush();
           await VerifyFile(fname, n, bufRecs, FileState.Corrupted);
         }
       }
@@ -214,6 +214,7 @@ namespace ChunkIO.Test {
         await WithFile(TestPristine);
         await WithFile(TestCorruption);
         await WithFile(TestTruncation);
+        await WithFile(TestNoMeters);
         await WithFile(TestAppend);
         await WithFile(TestConcurrent);
 
@@ -243,6 +244,23 @@ namespace ChunkIO.Test {
             await VerifyFile(fname, n, bufRecs, FileState.Pristine);
             File.Delete(fname);
           }
+        }
+
+        async Task TestNoMeters(string fname) {
+          await Write(fname, 1, n, bufRecs);
+          using (var file = new FileStream(fname, FileMode.Open, FileAccess.ReadWrite,
+                                           FileShare.Read, 1, useAsync: true)) {
+            for (long pos = 0; pos < file.Length; pos += Format.MeterInterval) {
+              var buf = new byte[1];
+              file.Seek(pos, SeekOrigin.Begin);
+              Assert.AreEqual(1, await file.ReadAsync(buf, 0, 1));
+              ++buf[0];
+              file.Seek(pos, SeekOrigin.Begin);
+              await file.WriteAsync(buf, 0, 1);
+            }
+          }
+          await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+          await CorruptVerifyFile(fname, n, bufRecs);
         }
 
         async Task TestConcurrent(string fname) {

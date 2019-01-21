@@ -58,8 +58,8 @@ namespace ChunkIO {
         m = MeterBefore(meter.Value.ChunkBeginPosition);
         to = meter.Value.ChunkBeginPosition;
       }
-      // This last scan is for the case where all meters are corrupted but we still can get to the
-      // desired file position by iterating over chunks.
+      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
+      // be able to get to them by scanning from the last known valid chunk in [0, from].
       return from < to ? await Scan(_last <= from ? _last : 0) : null;
 
       async Task<IChunk> Scan(long h) {
@@ -80,7 +80,7 @@ namespace ChunkIO {
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
-      if (from >= _reader.Length) return null;
+      if (from >= Math.Min(_reader.Length, to)) return null;
       if (from == _last) {
         IChunk res = await Scan(from);
         if (res != null) return res;
@@ -91,7 +91,10 @@ namespace ChunkIO {
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
       }
-      return null;
+      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
+      // be able to get to them by scanning from the last chunk in [0, from).
+      IChunk prev = await ReadLastAsync(0, from);
+      return prev == null ? null : await Scan(prev.EndPosition);
 
       async Task<IChunk> Scan(long h) {
         while (h < to) {
