@@ -402,7 +402,7 @@ namespace ChunkIO {
     }
 
     async Task Run() {
-      DateTime retry = _time.Value + _retry.Value;
+      DateTime? retry = _time + _retry;
       try {
         await Delay(_time.Value, _cancel.Token);
         await _sem.WaitAsync(_cancel.Token);
@@ -415,7 +415,11 @@ namespace ChunkIO {
       try {
         await _action.Invoke();
       } catch {
-        if (_task == null) await ScheduleAt(retry);
+        if (_task == null) {
+          DateTime now = DateTime.UtcNow;
+          if (now > retry) retry = now;
+          await ScheduleAt(retry);
+        }
       } finally {
         _sem.Release();
       }
