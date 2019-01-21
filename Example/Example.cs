@@ -127,7 +127,7 @@ namespace ChunkIO.Example {
     static async Task WriteOrderBooks(string fname) {
       Console.WriteLine("Writing order books into chunk #1");
       using (var writer = new OrderBookWriter(fname)) {
-        // A helper function that prints to console everything we are writing.
+        // Helper function that prints to console everything we are writing.
         Task Write(Event<PriceLevel[]> e) {
           // We are always sending patches to the writer. The writer then decides whether to
           // encode them as snapshots or patches on disk.
