@@ -118,21 +118,21 @@ namespace ChunkIO.Benchmark {
     // Sample run on Intel Core i9-7900X with M.2 SSD:
     //
     //   ===[ Chunk Size 0KiB ]===
-    //     WriteMany: 367,104 records, 14,687,760 bytes, 12,235 records/sec, 489,515 bytes/sec.
-    //     ReadAll: 367,104 records, 14,687,760 bytes, 19,749 records/sec, 790,162 bytes/sec.
-    //     SeekMany: 20 seeks, 2.0 seeks/sec.
+    //     WriteMany: 291,840 records, 11,676,464 bytes, 9,723 records/sec, 389,035 bytes/sec.
+    //     ReadAll: 291,840 records, 11,676,464 bytes, 12,700 records/sec, 508,143 bytes/sec.
+    //     SeekMany: 18 seeks, 1.7 seeks/sec.
     //   ===[ Chunk Size 32KiB ]===
-    //     WriteMany: 21,974,016 records, 33,597,499 bytes, 732,351 records/sec, 1,119,739 bytes/sec.
-    //     ReadAll: 21,974,016 records, 33,597,499 bytes, 3,507,819 records/sec, 5,363,332 bytes/sec.
-    //     SeekMany: 1,226 seeks, 122.5 seeks/sec.
+    //     WriteMany: 20,182,784 records, 30,858,569 bytes, 672,736 records/sec, 1,028,583 bytes/sec.
+    //     ReadAll: 20,182,784 records, 30,858,569 bytes, 7,696,455 records/sec, 11,767,533 bytes/sec.
+    //     SeekMany: 1,232 seeks, 123.1 seeks/sec.
     //   ===[ Chunk Size 64KiB ]===
-    //     WriteMany: 17,809,152 records, 27,087,560 bytes, 593,543 records/sec, 902,774 bytes/sec.
-    //     ReadAll: 17,809,152 records, 27,087,560 bytes, 4,029,928 records/sec, 6,129,485 bytes/sec.
-    //     SeekMany: 1,965 seeks, 196.4 seeks/sec.
+    //     WriteMany: 17,516,800 records, 26,642,917 bytes, 583,680 records/sec, 887,773 bytes/sec.
+    //     ReadAll: 17,516,800 records, 26,642,917 bytes, 7,972,044 records/sec, 12,125,418 bytes/sec.
+    //     SeekMany: 1,821 seeks, 182.1 seeks/sec.
     //   ===[ Chunk Size 128KiB ]===
-    //     WriteMany: 23,022,848 records, 34,937,240 bytes, 767,179 records/sec, 1,164,197 bytes/sec.
-    //     ReadAll: 23,022,848 records, 34,937,240 bytes, 3,844,840 records/sec, 5,834,556 bytes/sec.
-    //     SeekMany: 1,681 seeks, 168.0 seeks/sec.
+    //     WriteMany: 24,147,712 records, 36,644,234 bytes, 804,683 records/sec, 1,221,109 bytes/sec.
+    //     ReadAll: 24,147,712 records, 36,644,234 bytes, 5,146,398 records/sec, 7,809,676 bytes/sec.
+    //     SeekMany: 1,938 seeks, 193.7 seeks/sec.
     static async Task RunBenchmarks() {
       foreach (int chunkSizeKiB in new[] { 0, 32, 64, 128 }) {
         Console.WriteLine("===[ Chunk Size {0}KiB ]===", chunkSizeKiB);
