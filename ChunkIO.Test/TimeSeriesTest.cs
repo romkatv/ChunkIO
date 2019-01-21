@@ -56,7 +56,7 @@ namespace ChunkIO.Test {
     }
 
     class Writer : TimeSeriesWriter<Event<long>> {
-      public Writer(string fname) : base(fname, new Encoder(), new WriterOptions() { CloseChunk = null }) { }
+      public Writer(string fname, WriterOptions opt) : base(fname, new Encoder(), opt) { }
     }
 
     class Reader : TimeSeriesReader<Event<long>> {
@@ -67,21 +67,21 @@ namespace ChunkIO.Test {
       Debug.Assert(start > 0);
       Debug.Assert(count >= 0);
       Debug.Assert(bufRecs >= 0);
-      using (var writer = new Writer(fname)) {
+      using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null })) {
         long recs = 0;
         for (long i = start; i != start + count; ++i) {
-          await Do(() => writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i)));
+          await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
           if (++recs == bufRecs) {
-            await Do(() => writer.FlushAsync(flushToDisk: false));
+            await Flush();
             recs = 0;
           }
         }
-        await Do(() => writer.FlushAsync(flushToDisk: false));
+        await Flush();
 
-        async Task Do(Func<Task> action) {
+        async Task Flush() {
           while (true) {
             try {
-              await action.Invoke();
+              await writer.FlushAsync(flushToDisk: false);
               break;
             } catch (InjectedWriteException) {
             }
@@ -241,19 +241,68 @@ namespace ChunkIO.Test {
       WithErrorInjection(() => Task.WhenAll(Tests())).Wait();
 
       IEnumerable<Task> Tests() {
+        yield return TestTimeTriggers();
         for (long bufRecs = 1; bufRecs != 4; ++bufRecs) {
           for (long n = 0; n != 16; ++n) {
-            yield return Test(n, bufRecs);
+            yield return TestManyRecords(n, bufRecs);
           }
         }
         foreach (long bufRecs in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
           foreach (long n in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
-            yield return Test(n, bufRecs);
+            yield return TestManyRecords(n, bufRecs);
           }
         }
       }
 
-      async Task Test(long n, long bufRecs) {
+      async Task TestTimeTriggers() {
+        await WithFile((string fname) => Test(fname, new WriterOptions() {
+          CloseChunk = new Triggers() {
+            Age = TimeSpan.Zero,
+            AgeRetry = TimeSpan.Zero,
+          },
+          FlushToOS = new Triggers() {
+            Size = 0,
+          },
+        }));
+        await WithFile((string fname) => Test(fname, new WriterOptions() {
+          CloseChunk = new Triggers() {
+            Age = TimeSpan.Zero,
+            AgeRetry = TimeSpan.Zero,
+          },
+          FlushToOS = new Triggers() {
+            Age = TimeSpan.Zero,
+            AgeRetry = TimeSpan.Zero,
+          },
+        }));
+        await WithFile((string fname) => Test(fname, new WriterOptions() {
+          CloseChunk = new Triggers() {
+            Age = TimeSpan.Zero,
+            AgeRetry = TimeSpan.Zero,
+          },
+          FlushToDisk = new Triggers() {
+            Age = TimeSpan.Zero,
+            AgeRetry = TimeSpan.Zero,
+          },
+        }));
+
+        async Task Test(string fname, WriterOptions opt) {
+          using (var writer = new Writer(fname, opt)) {
+            await writer.Write(new Event<long>(new DateTime(1, DateTimeKind.Utc), 1));
+            while (true) {
+              ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
+              if (stats.Total > 0) {
+                Assert.AreEqual(1, stats.Total);
+                Assert.AreEqual(1, stats.First);
+                Assert.AreEqual(1, stats.Last);
+                break;
+              }
+              await Task.Delay(TimeSpan.FromMilliseconds(1));
+            }
+          }
+        }
+      }
+
+      async Task TestManyRecords(long n, long bufRecs) {
         Debug.Assert(n >= 0);
         Debug.Assert(bufRecs >= 1);
 
