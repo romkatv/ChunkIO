@@ -38,7 +38,7 @@ ChunkIO files have a fixed-size marker called *meter* at every file position div
 Meter bytes:
 
   * `[0, 8)`: Start position of the first chunk whose end position is after the meter. As a convention, chunks never start nor end immediately after a meter. Instead, such chunks are assumed to start/end at the 64KB boundary.
-  * `[8, 16)`: Hash of bytes `[0, 8)`. Readers ignore meters whose hashes don't match.
+  * `[8, 16)`: Hash of bytes `[0, 8)`. Readers ignore meters whose hashes don't match. Corrupted meters make chunk lookup slower. In the limiting case where all meters are corrupted, chunk lookup by position deteriorates from the regular `O(1)` to `O(filesize)`. However, all content can still be read provided that chunks themselves are not corrupted.
 
 ### Chunk
 
