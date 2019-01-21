@@ -59,12 +59,12 @@ namespace ChunkIO {
     // A chunk is automatically closed when all of the following conditions are true:
     //
     // 1. The chunk is not locked.
-    // 2. BytesWritten >= CloseAtSize || DateTime.UtcNow - CreatedAt >= CloseAtAge.
+    // 2. Stream.Length >= CloseAtSize || DateTime.UtcNow - CreatedAt >= CloseAtAge.
     //
     // An implication of this is that the chunk won't get closed if the second condition
     // becomes true while the chunk is locked as long as it reverts to false before unlocking.
     long? CloseAtSize { get; set; }
-    TimeSpan? CloseAtAge { get; set; }
+    TimeSpan? CloseAtAge { get; }
 
     // Drops the chunk without writing it to disk. The user must still unlock the chunk with
     // DisposeAsync() or Dispose() after calling Abandon(). The next call to BufferedWriter.LockChunk()
@@ -76,21 +76,52 @@ namespace ChunkIO {
   }
 
   public class Triggers {
+    // Triggers when the data gets bigger than this. This can happen only when unlocking a chunk with
+    // IOutputChunk.DisposeAsync(). Errors from the trigger are reported as exceptions and the trigger
+    // isn't retried automatically.
+    //
+    // Requires: Size == null || Size >= 0.
     public long? Size { get; set; }
+
+    // Triggers when the data gets older than this. This can happen only asynchronously while the user
+    // isn't holding a chunk lock. If the trigger fails, it's retried after AgeRetry.
+    //
+    // Requires: Age == null || Age >= TimeSpan.Zero.
+    // Requires: Age == null || AgeRetry != null.
     public TimeSpan? Age { get; set; }
+
+    // When the age-based trigger fails, it's retried after this long.
+    //
+    // Requires: AgeRetry == null || AgeRetry > TimeSpan.Zero.
+    // Requires: Age == null || AgeRetry != null.
+    public TimeSpan? AgeRetry { get; set; }
 
     public Triggers Clone() => (Triggers)MemberwiseClone();
 
     public void Validate() {
       if (Size < 0) throw new Exception($"Invalid Triggers.Size: {Size}");
       if (Age < TimeSpan.Zero) throw new Exception($"Invalid Triggers.Age: {Age}");
+      if (AgeRetry <= TimeSpan.Zero) throw new Exception($"Invalid Triggers.AgeRetry: {AgeRetry}");
+      if (Age != null && AgeRetry == null) throw new Exception("Triggers.AgeRetry must be set");
     }
   }
 
   public class WriterOptions {
     public bool AllowRemoteFlush { get; set; } = true;
+
     public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
+
+    // CloseChunk triggers define when a chunk should be auto-closed. See comments
+    // for IOutputChunk.CloseAtSize and IOutputChunk.Age for details.
     public Triggers CloseChunk { get; set; } = new Triggers() { Size = 64 << 10 };
+
+    // FlushToOS and FlushToDisk triggers define when chunks that have already been
+    // closed are flushed to OS and disk respectively. When FlushToDisk triggers, it
+    // automatically triggers FlushToOS. Neither FlushToOS nor FlushToDisk close the
+    // current chunk; they only flush previously closed chunks.
+    //
+    // The timer for these triggers starts when a chunk is closed. Their size-based
+    // trackers are incremented only when chunks are closed.
     public Triggers FlushToOS { get; set; } = new Triggers();
     public Triggers FlushToDisk { get; set; } = new Triggers();
 
@@ -132,10 +163,10 @@ namespace ChunkIO {
       opt.Validate();
       _opt = opt.Clone();
       _writer = new ChunkWriter(fname);
-      _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null));
-      _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false));
-      _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true));
-      if (opt.AllowRemoteFlush) {
+      _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
+      _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
+      _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
+      if (_opt.AllowRemoteFlush) {
         _listener = RemoteFlush.CreateListener(fname, FlushAsync);
       }
     }
@@ -150,7 +181,7 @@ namespace ChunkIO {
       if (_buf != null) return new LockedChunk(_buf, isNew: false);
       _buf = new Chunk(this);
       await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
-       return new LockedChunk(_buf, isNew: true);
+      return new LockedChunk(_buf, isNew: true);
     }
 
     // If there is current chunk, waits until it gets unlocked and writes its content to
@@ -236,8 +267,6 @@ namespace ChunkIO {
       try {
         if (_buf.Stream.Length >= _buf.CloseAtSize || _buf.IsAbandoned) {
           await DoCloseChunk(flushToDisk: null);
-        } else if (_buf.CreatedAt + _buf.CloseAtAge != _closeChunk.Time) {
-          await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
         }
       } finally {
         _sem.Release();
@@ -261,6 +290,7 @@ namespace ChunkIO {
       public bool IsNew { get; }
       public MemoryStream Stream => _buf.Stream;
       public DateTime CreatedAt => _buf.CreatedAt;
+      public TimeSpan? CloseAtAge => _buf.CloseAtAge;
 
       public UserData UserData {
         get => _buf.UserData;
@@ -273,10 +303,6 @@ namespace ChunkIO {
       public long? CloseAtSize {
         get => _buf.CloseAtSize;
         set { _buf.CloseAtSize = value; }
-      }
-      public TimeSpan? CloseAtAge {
-        get => _buf.CloseAtAge;
-        set { _buf.CloseAtAge = value; }
       }
 
       public void Abandon() { _buf.Abandon(); }
@@ -304,7 +330,7 @@ namespace ChunkIO {
       public UserData UserData { get; set; }
       public object UserState { get; set; }
       public long? CloseAtSize { get; set; }
-      public TimeSpan? CloseAtAge { get; set; }
+      public TimeSpan? CloseAtAge { get; }
       public bool IsAbandoned { get; internal set; }
 
       public void Abandon() { IsAbandoned = true; }
@@ -335,59 +361,61 @@ namespace ChunkIO {
   }
 
   // Thread-compatible but not thread-safe.
-  sealed class Timer : IDisposable {
+  sealed class Timer {
     readonly SemaphoreSlim _sem;
     readonly Func<Task> _action;
+    readonly TimeSpan? _retry;
     CancellationTokenSource _cancel = null;
+    DateTime? _time = null;
     Task _task = null;
 
-    public Timer(SemaphoreSlim sem, Func<Task> action) {
+    public Timer(SemaphoreSlim sem, Func<Task> action, TimeSpan? retry) {
       Debug.Assert(sem != null);
       Debug.Assert(action != null);
+      Debug.Assert(retry == null || retry > TimeSpan.Zero);
       _sem = sem;
       _action = action;
+      _retry = retry;
     }
 
-    public DateTime? Time { get; internal set; }
-
+    // Requires: The semaphore is locked.
     public async Task Stop() {
-      Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (Time == null));
-      if (_task == null) return;
-
-      _cancel.Cancel();
-      try { await _task; } catch { }
-      _cancel.Dispose();
-      _task = null;
-      _cancel = null;
-      Time = null;
+      Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (_time == null));
+      if (_task != null) {
+        _cancel.Cancel();
+        try { await _task; } catch { }
+        Debug.Assert(_task == null && _cancel == null && _time == null);
+      }
     }
 
+    // Requires: The semaphore is locked.
+    //
     // The returned task completes when the action is scheduled, which happens almost immediately.
     public async Task ScheduleAt(DateTime? t) {
       await Stop();
       if (t.HasValue) {
-        Time = t;
+        Debug.Assert(_retry.HasValue);
+        _time = t;
         _cancel = new CancellationTokenSource();
         _task = Run();
       }
     }
 
-    public void Dispose() => Stop().Wait();
-
     async Task Run() {
-      CancellationToken token = _cancel.Token;
+      DateTime retry = _time.Value + _retry.Value;
       try {
-        await Delay(Time.Value, token);
-      } catch (TaskCanceledException) {
-        return;
-      }
-      try {
-        await _sem.WaitAsync(token);
-      } catch (TaskCanceledException) {
-        return;
+        await Delay(_time.Value, _cancel.Token);
+        await _sem.WaitAsync(_cancel.Token);
+      } finally {
+        _cancel.Dispose();
+        _task = null;
+        _cancel = null;
+        _time = null;
       }
       try {
         await _action.Invoke();
+      } catch {
+        if (_task == null) await ScheduleAt(retry);
       } finally {
         _sem.Release();
       }

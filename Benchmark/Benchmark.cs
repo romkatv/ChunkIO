@@ -37,9 +37,19 @@ namespace ChunkIO.Benchmark {
     static WriterOptions Opt(int chunkSizeBytes) => new WriterOptions() {
       // Set all time-based triggers because this is what production code normally does.
       // Use large values that won't actually cause any flushes.
-      CloseChunk = new Triggers() { Age = TimeSpan.FromDays(1), Size = chunkSizeBytes },
-      FlushToOS = new Triggers() { Age = TimeSpan.FromDays(1) },
-      FlushToDisk = new Triggers() { Age = TimeSpan.FromDays(1) },
+      CloseChunk = new Triggers() {
+        Size = chunkSizeBytes,
+        Age = TimeSpan.FromDays(1),
+        AgeRetry = TimeSpan.FromDays(1),
+      },
+      FlushToOS = new Triggers() {
+        Age = TimeSpan.FromDays(1),
+        AgeRetry = TimeSpan.FromDays(1),
+      },
+      FlushToDisk = new Triggers() {
+        Age = TimeSpan.FromDays(1),
+        AgeRetry = TimeSpan.FromDays(1),
+      },
     };
   }
 

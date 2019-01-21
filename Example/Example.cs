@@ -107,6 +107,8 @@ namespace ChunkIO.Example {
       opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
       // Flush all closed chunks older than 3h to disk. This timer when a chunk is closed.
       opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
+      // Whenever time-based triggers fail, retry them after an hour.
+      opt.CloseChunk.AgeRetry = opt.FlushToOS.AgeRetry = opt.FlushToDisk.AgeRetry = Jitter(TimeSpan.FromHours(1));
       return opt;
 
       // Returns t multiplied by a random number in [0.5, 1).
