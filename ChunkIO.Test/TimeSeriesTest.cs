@@ -18,6 +18,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -69,10 +70,21 @@ namespace ChunkIO.Test {
       using (var writer = new Writer(fname)) {
         long recs = 0;
         for (long i = start; i != start + count; ++i) {
-          await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
+          await Do(() => writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i)));
           if (++recs == bufRecs) {
-            await writer.FlushAsync(flushToDisk: false);
+            await Do(() => writer.FlushAsync(flushToDisk: false));
             recs = 0;
+          }
+        }
+        await Do(() => writer.FlushAsync(flushToDisk: false));
+
+        async Task Do(Func<Task> action) {
+          while (true) {
+            try {
+              await action.Invoke();
+              break;
+            } catch (InjectedWriteException) {
+            }
           }
         }
       }
@@ -96,33 +108,44 @@ namespace ChunkIO.Test {
       using (var reader = new Reader(fname)) {
         var stats = new ReadStats();
         long lastLen = -1;
-        await reader.ReadAfter(new DateTime(after, DateTimeKind.Utc)).ForEachAsync((IEnumerable<Event<long>> buf) => {
-          Event<long>[] events = buf.ToArray();
-          for (int i = 0; i != events.Length; ++i) {
-            Assert.IsTrue(events[i].Value > 0);
-            Assert.AreEqual(events[i].Timestamp.Ticks, events[i].Value);
-            if (i != 0) Assert.AreEqual(events[i - 1].Value + 1, events[i].Value);
+        IAsyncEnumerable<IEnumerable<Event<long>>> chunks = reader.ReadAfter(new DateTime(after, DateTimeKind.Utc));
+        using (IAsyncEnumerator<IEnumerable<Event<long>>> iter = chunks.GetAsyncEnumerator()) {
+          while (await Do(() => iter.MoveNextAsync(CancellationToken.None))) {
+            Event<long>[] events = iter.Current.ToArray();
+            for (int i = 0; i != events.Length; ++i) {
+              Assert.IsTrue(events[i].Value > 0);
+              Assert.AreEqual(events[i].Timestamp.Ticks, events[i].Value);
+              if (i != 0) Assert.AreEqual(events[i - 1].Value + 1, events[i].Value);
+            }
+            Assert.AreNotEqual(0, events.Length);
+            Assert.IsTrue(events.Length <= bufRecs);
+            Assert.IsTrue(events[0].Value > stats.Last);
+            Assert.IsTrue((events[0].Value - 1) % bufRecs == 0);
+            if (stats.First == 0) {
+              stats.First = events.First().Value;
+            } else {
+              Assert.AreEqual(bufRecs, lastLen);
+              if (!state.HasFlag(FileState.Expanding)) Assert.IsTrue(events.First().Value > after);
+            }
+            stats.Last = events.Last().Value;
+            stats.Total += events.Length;
+            lastLen = events.Length;
           }
-          Assert.AreNotEqual(0, events.Length);
-          Assert.IsTrue(events.Length <= bufRecs);
-          Assert.IsTrue(events[0].Value > stats.Last);
-          Assert.IsTrue((events[0].Value - 1) % bufRecs == 0);
-          if (stats.First == 0) {
-            stats.First = events.First().Value;
-          } else {
-            Assert.AreEqual(bufRecs, lastLen);
-            if (!state.HasFlag(FileState.Expanding)) Assert.IsTrue(events.First().Value > after);
-          }
-          stats.Last = events.Last().Value;
-          stats.Total += events.Length;
-          lastLen = events.Length;
-          return Task.CompletedTask;
-        });
+        }
         return stats;
+      }
+
+      async Task<T> Do<T>(Func<Task<T>> action) {
+        while (true) {
+          try {
+            return await action.Invoke();
+          } catch (InjectedReadException) {
+          }
+        }
       }
     }
 
-    async Task VerifyFile(string fname, long n, long bufRecs, FileState state) {
+    static async Task VerifyFile(string fname, long n, long bufRecs, FileState state) {
       Debug.Assert(n >= 0);
       Debug.Assert(bufRecs > 0);
       var pos = new[] {
@@ -152,7 +175,7 @@ namespace ChunkIO.Test {
       }
     }
 
-    async Task CorruptVerifyFile(string fname, long n, long bufRecs) {
+    static async Task CorruptVerifyFile(string fname, long n, long bufRecs) {
       using (var file = new FileStream(fname, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, 1, useAsync: true)) {
         long size = file.Length;
         var pos = new[] {
@@ -174,7 +197,7 @@ namespace ChunkIO.Test {
       }
     }
 
-    async Task TruncateVerifyFile(string fname, long n, long bufRecs) {
+    static async Task TruncateVerifyFile(string fname, long n, long bufRecs) {
       using (var file = new FileStream(fname, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, 1, useAsync: true)) {
         long size = file.Length;
         var pos = new[] {
@@ -190,9 +213,32 @@ namespace ChunkIO.Test {
       }
     }
 
+    static async Task WithFile(Func<string, Task> action) {
+      string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+      try {
+        await action.Invoke(fname);
+      } finally {
+        if (File.Exists(fname)) File.Delete(fname);
+      }
+    }
+
+    static async Task WithErrorInjection(Func<Task> action) {
+      Debug.Assert(ByteWriter.ErrorInjector == null);
+      Debug.Assert(ByteReader.ErrorInjector == null);
+      ByteWriter.ErrorInjector = new WriteErrorInjector();
+      ByteReader.ErrorInjector = new ReadErrorInjector();
+      try {
+        await action.Invoke();
+      } finally {
+        ByteWriter.ErrorInjector = null;
+        ByteReader.ErrorInjector = null;
+      }
+    }
+
     [TestMethod]
     public void WriteAndReadTest() {
-      Task.WaitAll(Tests().ToArray());
+      Task.WhenAll(Tests()).Wait();
+      WithErrorInjection(() => Task.WhenAll(Tests())).Wait();
 
       IEnumerable<Task> Tests() {
         for (long bufRecs = 1; bufRecs != 4; ++bufRecs) {
@@ -259,7 +305,8 @@ namespace ChunkIO.Test {
               await file.WriteAsync(buf, 0, 1);
             }
           }
-          await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+          await VerifyFile(
+            fname, n, bufRecs, ByteWriter.ErrorInjector == null ? FileState.Pristine : FileState.Truncated);
           await CorruptVerifyFile(fname, n, bufRecs);
         }
 
@@ -268,15 +315,6 @@ namespace ChunkIO.Test {
           while (!w.IsCompleted) {
             await VerifyFile(fname, n, bufRecs, FileState.Expanding);
           }
-        }
-      }
-
-      async Task WithFile(Func<string, Task> action) {
-        string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        try {
-          await action.Invoke(fname);
-        } finally {
-          if (File.Exists(fname)) File.Delete(fname);
         }
       }
     }
