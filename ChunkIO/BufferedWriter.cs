@@ -92,7 +92,7 @@ namespace ChunkIO {
 
     // When the age-based trigger fails, it's retried after this long.
     //
-    // Requires: AgeRetry == null || AgeRetry > TimeSpan.Zero.
+    // Requires: AgeRetry == null || AgeRetry >= TimeSpan.Zero.
     // Requires: Age == null || AgeRetry != null.
     public TimeSpan? AgeRetry { get; set; }
 
@@ -101,7 +101,7 @@ namespace ChunkIO {
     public void Validate() {
       if (Size < 0) throw new Exception($"Invalid Triggers.Size: {Size}");
       if (Age < TimeSpan.Zero) throw new Exception($"Invalid Triggers.Age: {Age}");
-      if (AgeRetry <= TimeSpan.Zero) throw new Exception($"Invalid Triggers.AgeRetry: {AgeRetry}");
+      if (AgeRetry < TimeSpan.Zero) throw new Exception($"Invalid Triggers.AgeRetry: {AgeRetry}");
       if (Age != null && AgeRetry == null) throw new Exception("Triggers.AgeRetry must be set");
     }
   }
@@ -372,7 +372,7 @@ namespace ChunkIO {
     public Timer(SemaphoreSlim sem, Func<Task> action, TimeSpan? retry) {
       Debug.Assert(sem != null);
       Debug.Assert(action != null);
-      Debug.Assert(retry == null || retry > TimeSpan.Zero);
+      Debug.Assert(retry == null || retry >= TimeSpan.Zero);
       _sem = sem;
       _action = action;
       _retry = retry;
