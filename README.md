@@ -23,7 +23,7 @@ No dependencies other than .NET Framework.
 
 ## Supported Platofrms
 
-Lightly tested (and heavily used in production) on Windows 10 with .NET Framework 4.7.2.
+Lightly tested (and heavily used in production) on Windows with .NET Framework 4.7.2.
 
 ## File Format
 
