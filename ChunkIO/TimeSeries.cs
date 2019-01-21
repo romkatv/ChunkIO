@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
@@ -156,20 +157,8 @@ namespace ChunkIO {
     // just the last chunk.
     //
     // The caller doesn't have to iterate over all chunks (that is, over the whole IAsyncEnumerable) or
-    // over all records in a chunk (over IEnumerable<T>). It's OK to stop the iteration half-way.
-    public IAsyncEnumerable<IEnumerable<T>> ReadAfter(DateTime t) {
-      return new AsyncEnumerable<IEnumerable<T>>(async yield => {
-        InputChunk buf = await _reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > t);
-        while (buf != null) {
-          try {
-            await yield.ReturnAsync(DecodeChunk(buf, Decoder));
-          } finally {
-            buf.Dispose();
-          }
-          buf = await _reader.ReadNextAsync();
-        }
-      });
-    }
+    // over all records in a chunk (over IEnumerable<T>). It's OK to stop iterating half-way.
+    public IAsyncEnumerable<IEnumerable<T>> ReadAfter(DateTime t) => new Chunks(this, t);
 
     public void Dispose() => Dispose(true);
 
@@ -185,10 +174,66 @@ namespace ChunkIO {
       }
     }
 
-    static IEnumerable<T> DecodeChunk(InputChunk buf, ITimeSeriesDecoder<T> decoder) {
-      decoder.DecodePrimary(buf, new DateTime(buf.UserData.Long0, DateTimeKind.Utc), out T val);
+    static IEnumerable<T> DecodeChunk(InputChunk chunk, ITimeSeriesDecoder<T> decoder) {
+      decoder.DecodePrimary(chunk, new DateTime(chunk.UserData.Long0, DateTimeKind.Utc), out T val);
       yield return val;
-      while (decoder.DecodeSecondary(buf, out val)) yield return val;
+      while (decoder.DecodeSecondary(chunk, out val)) yield return val;
+    }
+
+    class ChunkEnumerator : IAsyncEnumerator<IEnumerable<T>> {
+      readonly TimeSeriesReader<T> _reader;
+      readonly DateTime _after;
+      InputChunk _chunk = null;
+      bool _done = false;
+      long _next = 0;
+
+      public ChunkEnumerator(TimeSeriesReader<T> reader, DateTime after) {
+        _reader = reader;
+        _after = after;
+      }
+
+      public IEnumerable<T> Current { get; internal set; }
+
+      public async Task<bool> MoveNextAsync(CancellationToken cancel) {
+        if (_done) return false;
+
+        if (_chunk == null) {
+          _chunk = await _reader._reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > _after);
+        } else {
+          _chunk.Dispose();
+          _chunk = await _reader._reader.ReadNextAsync(_next);
+        }
+
+        if (_chunk == null) {
+          _done = true;
+          return false;
+        } else {
+          Current = DecodeChunk(_chunk, _reader.Decoder);
+          _next = _chunk.EndPosition;
+          return true;
+        }
+      }
+
+      public void Reset() {
+        _chunk?.Dispose();
+        _chunk = null;
+        _next = 0;
+        _done = false;
+      }
+
+      public void Dispose() => Reset();
+    }
+
+    class Chunks : IAsyncEnumerable<IEnumerable<T>> {
+      readonly TimeSeriesReader<T> _reader;
+      readonly DateTime _after;
+
+      public Chunks(TimeSeriesReader<T> reader, DateTime after) {
+        _reader = reader;
+        _after = after;
+      }
+
+      public IAsyncEnumerator<IEnumerable<T>> GetAsyncEnumerator() => new ChunkEnumerator(_reader, _after);
     }
   }
 }

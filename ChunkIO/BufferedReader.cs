@@ -24,13 +24,18 @@ using System.Threading.Tasks;
 
 namespace ChunkIO {
   class InputChunk : MemoryStream {
-    public InputChunk(UserData userData) { UserData = userData; }
+    public InputChunk(long beginPosition, long endPosition, UserData userData) {
+      BeginPosition = beginPosition;
+      EndPosition = endPosition;
+      UserData = userData;
+    }
+    public long BeginPosition { get; }
+    public long EndPosition { get; }
     public UserData UserData { get; }
   }
 
   sealed class BufferedReader : IDisposable {
     readonly ChunkReader _reader;
-    long _last = 0;
 
     public BufferedReader(string fname) {
       _reader = new ChunkReader(fname);
@@ -68,8 +73,8 @@ namespace ChunkIO {
 
     // Returns the chunk that follows the last chunk returned by ReadAtPartitionAsync() or ReadNextAsync(),
     // or null if there aren't any.
-    public async Task<InputChunk> ReadNextAsync() =>
-      await MakeChunk(await _reader.ReadFirstAsync(_last, long.MaxValue), Scan.Forward);
+    public async Task<InputChunk> ReadNextAsync(long begin) =>
+      await MakeChunk(await _reader.ReadFirstAsync(begin, long.MaxValue), Scan.Forward);
 
     public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => RemoteFlush.FlushAsync(Name, flushToDisk);
 
@@ -92,10 +97,7 @@ namespace ChunkIO {
       while (true) {
         if (chunk == null) return null;
         InputChunk res = await Decompress(chunk);
-        if (res != null) {
-          _last = chunk.EndPosition;
-          return res;
-        }
+        if (res != null) return res;
         switch (scan) {
           case Scan.None:
             return null;
@@ -115,7 +117,7 @@ namespace ChunkIO {
     public static async Task<InputChunk> Decompress(IChunk chunk) {
       var content = new byte[chunk.ContentLength];
       if (!await chunk.ReadContentAsync(content, 0)) return null;
-      var res = new InputChunk(chunk.UserData);
+      var res = new InputChunk(chunk.BeginPosition, chunk.EndPosition, chunk.UserData);
       try {
         Compression.DecompressTo(content, 0, content.Length, res);
       } catch {
