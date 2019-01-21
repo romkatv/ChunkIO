@@ -233,10 +233,16 @@ namespace ChunkIO.Test {
         }
 
         async Task TestAppend(string fname) {
-          long half = (n / 2) / bufRecs * bufRecs;
-          await Write(fname, 1, half, bufRecs);
-          await Write(fname, 1 + half, n - half, bufRecs);
-          await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+          foreach (int junk in new[] { 0, 1, 128 << 10 }) {
+            long half = (n / 2) / bufRecs * bufRecs;
+            File.AppendAllText(fname, new string(' ', junk));
+            await Write(fname, 1, half, bufRecs);
+            File.AppendAllText(fname, new string(' ', junk));
+            await Write(fname, 1 + half, n - half, bufRecs);
+            File.AppendAllText(fname, new string(' ', junk));
+            await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+            File.Delete(fname);
+          }
         }
 
         async Task TestConcurrent(string fname) {
