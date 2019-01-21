@@ -27,13 +27,15 @@ namespace ChunkIO {
   // Locked chunks are returned by BufferedWriter.LockChunk(). They must be unlocked with
   // OutputChunk.DisposeAsync() or OutputChunk.Dispose().
   //
-  // Writes to the chunk do not block on IO but DisposeAsync() and Dispose() potentially do.
+  // Writes to the chunk do not block on IO but BufferedWriter.LockChunk(), IOutputChunk.DisposeAsync()
+  // and IOutputChunk.Dispose() potentially do.
   interface IOutputChunk : IDisposable, IAsyncDisposable {
     // Called right before the chunk is closed unless it was abandoned. Afterwards the chunk no
     // longer gets used, so there is no need to unsubscribe from the event. Can fire either
     // synchronously from DisposeAsync() or Dispose(), or from another thread at any time. The chunk is
     // considered locked when the event fires, hence it's legal to write to it. If Abandon() is
-    // called from OnClose, the chunk is dropped on the floor.
+    // called from OnClose, the chunk is dropped on the floor. If OnClose throws, it'll be called
+    // again on the next attempt to close the chunk.
     event Action OnClose;
 
     // Flush() and FlushAsync() have no effect. Use BufferedWriter.CloseChunkAsync() and
@@ -175,10 +177,24 @@ namespace ChunkIO {
 
     // If there is a current chunk, locks and returns it. IOutputChunk.IsNew is false.
     // Otherwise creates a new chunk, locks and returns it. IOutputChunk.IsNew is true.
+    //
+    // If an error was encountered when an attempt was made to flush the last chunk,
+    // LockChunk() will try to flush it and will throw if unable to do so.
     public async Task<IOutputChunk> LockChunk() {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
       await _sem.WaitAsync();
-      if (_buf != null) return new LockedChunk(_buf, isNew: false);
+      if (_buf != null) {
+        if (!_buf.CompressedContent.HasValue) {
+          Debug.Assert(!_buf.IsAbandoned);
+          return new LockedChunk(_buf, isNew: false);
+        }
+        try {
+          await DoCloseChunk(flushToDisk: false);
+        } catch {
+          _sem.Release();
+          throw;
+        }
+      }
       _buf = new Chunk(this);
       await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
       return new LockedChunk(_buf, isNew: true);
@@ -225,11 +241,9 @@ namespace ChunkIO {
       Debug.Assert(!_disposed);
       Debug.Assert(_sem.CurrentCount == 0);
       if (_buf != null) {
-        if (!_buf.IsAbandoned) _buf.FireOnClose();
-        if (!_buf.IsAbandoned) {
-          ArraySegment<byte> content = Compression.Compress(
-              _buf.Stream.GetBuffer(), 0, (int)_buf.Stream.Length, _opt.CompressionLevel);
-          await _writer.WriteAsync(_buf.UserData, content.Array, content.Offset, content.Count);
+        if (_buf.Close(_opt.CompressionLevel)) {
+          ArraySegment<byte> compressed = _buf.CompressedContent.Value;
+          await _writer.WriteAsync(_buf.UserData, compressed.Array, compressed.Offset, compressed.Count);
           if (_bufDisk == null) await _flushToDisk.ScheduleAt(DateTime.UtcNow + _opt.FlushToDisk.Age);
           if (_bufOS == null) await _flushToOS.ScheduleAt(DateTime.UtcNow + _opt.FlushToOS.Age);
           _bufOS = (_bufOS ?? 0) + _buf.Stream.Length;
@@ -325,6 +339,7 @@ namespace ChunkIO {
 
       public event Action OnClose;
 
+      public ArraySegment<byte>? CompressedContent { get; internal set; }
       public MemoryStream Stream { get; } = new MemoryStream(4 << 10);
       public DateTime CreatedAt { get; } = DateTime.UtcNow;
       public UserData UserData { get; set; }
@@ -335,8 +350,16 @@ namespace ChunkIO {
 
       public void Abandon() { IsAbandoned = true; }
       public void Dispose() => Stream.Dispose();
-      public void FireOnClose() => OnClose?.Invoke();
       public Task Unlock() => _writer.Unlock();
+
+      public bool Close(CompressionLevel lvl) {
+        if (IsAbandoned) return false;
+        if (CompressedContent.HasValue) return true;
+        OnClose?.Invoke();
+        if (IsAbandoned) return false;
+        CompressedContent = Compression.Compress(Stream.GetBuffer(), 0, (int)Stream.Length, lvl);
+        return true;
+      }
     }
   }
 
@@ -380,6 +403,7 @@ namespace ChunkIO {
 
     // Requires: The semaphore is locked.
     public async Task Stop() {
+      Debug.Assert(_sem.CurrentCount == 0);
       Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (_time == null));
       if (_task != null) {
         _cancel.Cancel();
@@ -392,6 +416,7 @@ namespace ChunkIO {
     //
     // The returned task completes when the action is scheduled, which happens almost immediately.
     public async Task ScheduleAt(DateTime? t) {
+      Debug.Assert(_sem.CurrentCount == 0);
       await Stop();
       if (t.HasValue) {
         Debug.Assert(_retry.HasValue);

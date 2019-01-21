@@ -73,6 +73,49 @@ namespace ChunkIO {
     // the completion of the task it returns.
     public ITimeSeriesEncoder<T> Encoder { get; }
 
+    // The number of records that have been written through this instance of TimeSeriesWriter.
+    // Some records may not yet have been flushed to disk or even to OS. However, it's guaranteed
+    // that should FlushAsync() succeed, the specified number of records will definitely have
+    // appeared in the file.
+    //
+    // It's illegal to read RecordsWritten concurrently with Write() or with the task it returns.
+    //
+    // This field can be used to figure out whether the same record should be passed to Write() again
+    // after an exception.
+    //
+    //   async Task WriteReliably(TimeSeriesWriter<T> writer, T record) {
+    //     long written = writer.RecordsWritten;
+    //     while (true) {
+    //       try {
+    //         await writer.Write(record);
+    //         return;
+    //       } catch {
+    //         if (writer.RecordsWritten > written) {
+    //           // Record has been added to the chunk but the chunk couldn't be written to file.
+    //           // The most common reason is full disk. We shouldn't attempt to write
+    //           // the same record again. To persist it, we will call FlushAsync(). If we don't do
+    //           // that, the next call to Write() will automatically call FlushAsync() and will
+    //           // throw on error without writing the new record to the chunk.
+    //           break;
+    //         } else {
+    //           Console.Error.WriteLine("Failed to write record. Will retry in 5 seconds.");
+    //           await Task.Delay(TimeSpan.FromSeconds(5));
+    //         }
+    //       }
+    //     }
+    //
+    //     while (true) {
+    //       try {
+    //         await writer.FlushAsync(flushToDisk: false);
+    //         return;
+    //       } catch {
+    //         Console.Error.WriteLine("Failed to flush. Will retry in 5 seconds.");
+    //         await Task.Delay(TimeSpan.FromSeconds(5));
+    //       }
+    //     }
+    //   }
+    public long RecordsWritten { get; internal set; }
+
     // Throws on IO errors. Can block on IO.
     //
     // It's illegal to call Write() before the task returned by the previous call to Write() has completed.
@@ -89,6 +132,7 @@ namespace ChunkIO {
         } else {
           Encoder.EncodeSecondary(buf.Stream, val);
         }
+        ++RecordsWritten;
       } catch {
         buf.Abandon();
         throw;

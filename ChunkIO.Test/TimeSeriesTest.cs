@@ -66,15 +66,12 @@ namespace ChunkIO.Test {
     static async Task Write(string fname, long start, long count, long bufRecs) {
       Debug.Assert(start > 0);
       Debug.Assert(count >= 0);
-      Debug.Assert(bufRecs >= 0);
+      Debug.Assert(bufRecs > 0);
       using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null })) {
-        long recs = 0;
         for (long i = start; i != start + count; ++i) {
           await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
-          if (++recs == bufRecs) {
-            await Flush();
-            recs = 0;
-          }
+          Assert.AreEqual(i - start + 1, writer.RecordsWritten);
+          if (writer.RecordsWritten % bufRecs == 0) await Flush();
         }
         await Flush();
 
@@ -241,6 +238,7 @@ namespace ChunkIO.Test {
       WithErrorInjection(() => Task.WhenAll(Tests())).Wait();
 
       IEnumerable<Task> Tests() {
+        yield return TestSizeTriggers();
         yield return TestTimeTriggers();
         for (long bufRecs = 1; bufRecs != 4; ++bufRecs) {
           for (long n = 0; n != 16; ++n) {
@@ -250,6 +248,38 @@ namespace ChunkIO.Test {
         foreach (long bufRecs in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
           foreach (long n in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
             yield return TestManyRecords(n, bufRecs);
+          }
+        }
+      }
+
+      async Task TestSizeTriggers() {
+        await WithFile(TestCloseChunk);
+
+        async Task TestCloseChunk(string fname) {
+          var opt = new WriterOptions() {
+            CloseChunk = new Triggers() { Size = 0 },
+            FlushToOS = new Triggers() { Size = 0 },
+          };
+          using (var writer = new Writer(fname, opt)) {
+            while (true) {
+              try {
+                long n = writer.RecordsWritten + 1;
+                await writer.Write(new Event<long>(new DateTime(n, DateTimeKind.Utc), n));
+                break;
+              } catch (InjectedWriteException) {
+              }
+            }
+            Assert.IsTrue(writer.RecordsWritten > 0);
+            while (true) {
+              ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
+              if (stats.Total >= writer.RecordsWritten) {
+                Assert.AreEqual(1, stats.First);
+                Assert.AreEqual(writer.RecordsWritten, stats.Last);
+                Assert.AreEqual(writer.RecordsWritten, stats.Total);
+                break;
+              }
+              await Task.Delay(TimeSpan.FromMilliseconds(1));
+            }
           }
         }
       }
