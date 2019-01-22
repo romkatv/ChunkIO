@@ -220,9 +220,16 @@ namespace ChunkIO {
     // Thus, ReadAfter(DateTime.MinValue) reads all data while ReadAfter(DateTime.MaxValue) reads
     // just the last chunk.
     //
+    // In addition, chunks whose start file position is outside of [from, to) are also ignored.
+    // There are no constraints on the values of the boundaries. Even long.MinValue and long.MaxValue
+    // are legal. If from >= to, the result is empty.
+    //
     // The caller doesn't have to iterate over all chunks (that is, over the whole IAsyncEnumerable) or
     // over all records in a chunk (over IDecodedChunk<T>). It's OK to stop iterating half-way.
-    public IAsyncEnumerable<IDecodedChunk<T>> ReadAfter(DateTime t) => new Chunks(this, t);
+    public IAsyncEnumerable<IDecodedChunk<T>> ReadAfter(DateTime t, long from, long to) =>
+        new Chunks(this, t, from, to);
+
+    public IAsyncEnumerable<IDecodedChunk<T>> ReadAfter(DateTime t) => ReadAfter(t, 0, long.MaxValue);
 
     public void Dispose() => Dispose(true);
 
@@ -262,13 +269,17 @@ namespace ChunkIO {
     class ChunkEnumerator : IAsyncEnumerator<IDecodedChunk<T>> {
       readonly TimeSeriesReader<T> _reader;
       readonly DateTime _after;
+      readonly long _from;
+      readonly long _to;
       InputChunk _chunk = null;
       bool _done = false;
       long _next = 0;
 
-      public ChunkEnumerator(TimeSeriesReader<T> reader, DateTime after) {
+      public ChunkEnumerator(TimeSeriesReader<T> reader, DateTime after, long from, long to) {
         _reader = reader;
         _after = after;
+        _from = from;
+        _to = to;
       }
 
       public IDecodedChunk<T> Current { get; internal set; }
@@ -277,10 +288,10 @@ namespace ChunkIO {
         if (_done) return false;
 
         if (_chunk == null) {
-          _chunk = await _reader._reader.ReadAtPartitionAsync((UserData u) => new DateTime(u.Long0) > _after);
+          _chunk = await _reader._reader.ReadAtPartitionAsync(_from, _to, u => new DateTime(u.Long0) > _after);
         } else {
           _chunk.Dispose();
-          _chunk = await _reader._reader.ReadNextAsync(_next);
+          _chunk = await _reader._reader.ReadNextAsync(_next, _to);
         }
 
         if (_chunk == null) {
@@ -306,13 +317,18 @@ namespace ChunkIO {
     class Chunks : IAsyncEnumerable<IDecodedChunk<T>> {
       readonly TimeSeriesReader<T> _reader;
       readonly DateTime _after;
+      readonly long _from;
+      readonly long _to;
 
-      public Chunks(TimeSeriesReader<T> reader, DateTime after) {
+      public Chunks(TimeSeriesReader<T> reader, DateTime after, long from, long to) {
         _reader = reader;
         _after = after;
+        _from = from;
+        _to = to;
       }
 
-      public IAsyncEnumerator<IDecodedChunk<T>> GetAsyncEnumerator() => new ChunkEnumerator(_reader, _after);
+      public IAsyncEnumerator<IDecodedChunk<T>> GetAsyncEnumerator() =>
+          new ChunkEnumerator(_reader, _after, _from, _to);
     }
   }
 }

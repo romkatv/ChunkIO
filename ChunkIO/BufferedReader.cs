@@ -48,7 +48,7 @@ namespace ChunkIO {
 
     // In order:
     //
-    //   * If the data source is empty, returns null.
+    //   * If there are no chunks with the starting file position in [from, to), returns null.
     //   * Else if the predicate evaluates to true on the first chunk, returns the first chunk.
     //   * Else returns a chunk for which the predicate evaluates to false and either it's the
     //     last chunk or the predicate evaluates to true on the next chunk. If there are multiple
@@ -56,16 +56,21 @@ namespace ChunkIO {
     //
     // Implication: If false chunks cannot follow true chunks, returns the last false chunk if
     // there are any or the very first chunk otherwise.
-    public async Task<InputChunk> ReadAtPartitionAsync(Func<UserData, bool> pred) {
+    //
+    // There are no constraints on the values of positions boundaries. Even long.MinValue and
+    // long.MaxValue are legal. If from >= to, the result is null.
+    public async Task<InputChunk> ReadAtPartitionAsync(long from, long to, Func<UserData, bool> pred) {
       if (pred == null) throw new ArgumentNullException(nameof(pred));
-      IChunk left = await _reader.ReadFirstAsync(0, long.MaxValue);
-      if (left == null || pred.Invoke(left.UserData)) return await MakeChunk(left, Scan.Forward);
-      IChunk right = await _reader.ReadLastAsync(left.EndPosition, long.MaxValue);
-      if (right == null) return await MakeChunk(left, Scan.None);
-      if (!pred.Invoke(right.UserData)) return await MakeChunk(right, Scan.Backward);
+      IChunk left = await _reader.ReadFirstAsync(from, to);
+      if (left == null || pred.Invoke(left.UserData)) return await MakeChunk(left, Scan.Forward, from, to);
+      IChunk right = await _reader.ReadLastAsync(left.EndPosition, to);
+      if (right == null) return await MakeChunk(left, Scan.None, from, to);
+      if (!pred.Invoke(right.UserData)) return await MakeChunk(right, Scan.Backward, from, to);
       while (true) {
         IChunk mid = await _reader.ReadMiddleAsync(left.EndPosition, right.BeginPosition);
-        if (mid == null) return await MakeChunk(left, Scan.Backward) ?? await MakeChunk(left, Scan.Forward);
+        if (mid == null) {
+          return await MakeChunk(left, Scan.Backward, from, to) ?? await MakeChunk(left, Scan.Forward, from, to);
+        }
         if (pred.Invoke(mid.UserData)) {
           right = mid;
         } else {
@@ -76,8 +81,8 @@ namespace ChunkIO {
 
     // Returns the chunk that follows the last chunk returned by ReadAtPartitionAsync() or ReadNextAsync(),
     // or null if there aren't any.
-    public async Task<InputChunk> ReadNextAsync(long begin) =>
-      await MakeChunk(await _reader.ReadFirstAsync(begin, long.MaxValue), Scan.Forward);
+    public async Task<InputChunk> ReadNextAsync(long from, long to) =>
+        await MakeChunk(await _reader.ReadFirstAsync(from, to), Scan.Forward, from, to);
 
     public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => RemoteFlush.FlushAsync(Name, flushToDisk);
 
@@ -89,7 +94,7 @@ namespace ChunkIO {
       Backward
     }
 
-    async Task<InputChunk> MakeChunk(IChunk chunk, Scan scan) {
+    async Task<InputChunk> MakeChunk(IChunk chunk, Scan scan, long from, long to) {
       while (true) {
         if (chunk == null) return null;
         InputChunk res = await Decompress(chunk);
@@ -98,10 +103,10 @@ namespace ChunkIO {
           case Scan.None:
             return null;
           case Scan.Forward:
-            chunk = await _reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
+            chunk = await _reader.ReadFirstAsync(chunk.EndPosition, to);
             break;
           case Scan.Backward:
-            chunk = await _reader.ReadLastAsync(0, chunk.BeginPosition);
+            chunk = await _reader.ReadLastAsync(from, chunk.BeginPosition);
             break;
           default:
             Debug.Fail("Invalid scan");

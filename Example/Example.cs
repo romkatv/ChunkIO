@@ -18,6 +18,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO.Example {
@@ -168,6 +169,16 @@ namespace ChunkIO.Example {
       }
     }
 
+    static void PrintChunk(IDecodedChunk<Event<PriceLevel[]>> chunk) {
+      // Our encoder and decoder guarantee that every chunk has at least one event, the first is
+      // always a snapshot and the rest are always patches.
+      bool isPrimary = true;
+      foreach (Event<PriceLevel[]> e in chunk) {
+        Console.WriteLine("  {0}: {1}", isPrimary ? "Snapshot" : "Patch   ", Print(e));
+        isPrimary = false;
+      }
+    }
+
     // Reads order books from the specified file. Skips chunks whose successors have timestamps not
     // smaller than the specified time. In other words, it reads all order books after `from` and
     // perhaps a little bit extra before that.
@@ -179,18 +190,38 @@ namespace ChunkIO.Example {
         // doesn't hurt.
         await reader.FlushRemoteWriterAsync(flushToDisk: false);
         // Now read order books one chunk at a time.
-        await reader.ReadAfter(from).ForEachAsync(ProcessEvents);
+        await reader.ReadAfter(from).ForEachAsync((chunk) => {
+          PrintChunk(chunk);
+          return Task.CompletedTask;
+        });
       }
+    }
 
-      Task ProcessEvents(IDecodedChunk<Event<PriceLevel[]>> events) {
-        // Our encoder and decoder guarantee that every chunk has at least one event, the first is
-        // always a snapshot and the rest are always patches.
-        bool isPrimary = true;
-        foreach (Event<PriceLevel[]> e in events) {
-          Console.WriteLine("  {0}: {1}", isPrimary ? "Snapshot" : "Patch   ", Print(e));
-          isPrimary = false;
-        }
-        return Task.CompletedTask;
+    // Advanced two-step method of reading ChunkIO files while another process is writing to them.
+    // The goal is to miss as little data as possible.
+    static async Task ReadOrderBooksTwoStep(string fname, DateTime from) {
+      Console.WriteLine("Reading order books in two steps starting from {1:yyyy-MM-dd HH:mm}", fname, from);
+      using (var reader = new OrderBookReader(fname)) {
+        // Flush twice to ensure that all chunks with begin file positions in [0, length) are complete.
+        await reader.FlushRemoteWriterAsync(flushToDisk: false);
+        long length = reader.Length;
+        await reader.FlushRemoteWriterAsync(flushToDisk: false);
+        // Scan the data we are interested in but ignore all chunks that start outside of [0, length).
+        // Remember the end position of the last chunk.
+        long end = 0;
+        await reader.ReadAfter(from, 0, length).ForEachAsync((chunk) => {
+          PrintChunk(chunk);
+          end = chunk.EndPosition;
+          return Task.CompletedTask;
+        });
+        // Flush and then scan the rest of the data. Unlike the first scan, this one shouldn't take long
+        // because we only need to process what has been produced by the writer while we were working on
+        // the bulk of the data.
+        await reader.FlushRemoteWriterAsync(flushToDisk: false);
+        await reader.ReadAfter(DateTime.MinValue, length, long.MaxValue).ForEachAsync((chunk) => {
+          PrintChunk(chunk);
+          return Task.CompletedTask;
+        });
       }
     }
 
@@ -202,23 +233,26 @@ namespace ChunkIO.Example {
     //     00:02 => sell 4 @ 6
     //   Writing order books into chunk #2
     //     00:03 => buy  0 @ 2; sell 2 @ 6
-    //
+    //   
     //   Reading order books starting from 0001-01-01 00:00
     //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
     //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
     //     Patch   : 00:02 => sell 4 @ 6
     //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
-    //
+    //   
     //   Reading order books starting from 2000-01-01 00:02
     //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
     //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
     //     Patch   : 00:02 => sell 4 @ 6
     //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
-    //
+    //   
     //   Reading order books starting from 2000-01-01 00:03
     //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
-    //
+    //   
     //   Reading order books starting from 9999-12-31 23:59
+    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //   
+    //   Reading order books in two steps starting from 2000-01-01 00:03
     //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
     static int Main(string[] args) {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -237,6 +271,9 @@ namespace ChunkIO.Example {
         Console.WriteLine();
         // Reading from DateTime.MaxValue always gives the very last chunk.
         ReadOrderBooks(fname, DateTime.MaxValue).Wait();
+        Console.WriteLine();
+        // ReadOrderBooksTwoStep() will read the same data as ReadOrderBooks() because there are no writers.
+        ReadOrderBooksTwoStep(fname, T0 + TimeSpan.FromMinutes(3)).Wait();
         return 0;
       } catch (Exception e) {
         Console.Error.WriteLine("Error: {0}", e);
