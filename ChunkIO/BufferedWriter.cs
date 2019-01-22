@@ -406,8 +406,11 @@ namespace ChunkIO {
       Debug.Assert(_sem.CurrentCount == 0);
       Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (_time == null));
       if (_task != null) {
+        // _cancel.Cancel() can cause Run() to continue *synchronously*. Thus, _task can be
+        // null when _cancel.Cancel() returns.
+        Task t = _task;
         _cancel.Cancel();
-        try { await _task; } catch { }
+        try { await t; } catch { }
         Debug.Assert(_task == null && _cancel == null && _time == null);
       }
     }
