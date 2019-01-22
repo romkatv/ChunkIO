@@ -101,40 +101,44 @@ namespace ChunkIO.Benchmark {
     // to seek are uniformly distributed in [0, maxTicks].
     static async Task SeekMany(string fname, long maxTicks, double seconds) {
       if (maxTicks >= int.MaxValue) throw new Exception("Sorry, not implemented");
-      using (var reader = new EmptyReader(fname)) {
         var rng = new Random();
         long seeks = 0;
         DateTime start = DateTime.UtcNow;
         do {
           ++seeks;
           var t = new DateTime(rng.Next((int)maxTicks + 1), DateTimeKind.Utc);
-          await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
+          using (var reader = new EmptyReader(fname)) {
+            await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
+          }
         } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
         seconds = (DateTime.UtcNow - start).TotalSeconds;
         Console.WriteLine("  SeekMany: {0:N0} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
-      }
     }
 
     // Sample run on Intel Core i9-7900X with M.2 SSD:
     //
     //   ===[ Chunk Size 0KiB ]===
-    //     WriteMany: 291,840 records, 11,676,464 bytes, 9,723 records/sec, 389,035 bytes/sec.
-    //     ReadAll: 291,840 records, 11,676,464 bytes, 12,700 records/sec, 508,143 bytes/sec.
-    //     SeekMany: 18 seeks, 1.7 seeks/sec.
+    //     WriteMany: 259,328 records, 10,375,664 bytes, 8,642 records/sec, 345,781 bytes/sec.
+    //     ReadAll: 259,328 records, 10,375,664 bytes, 11,347 records/sec, 453,979 bytes/sec.
+    //     SeekMany: 49 seeks, 4.8 seeks/sec.
     //   ===[ Chunk Size 32KiB ]===
-    //     WriteMany: 20,182,784 records, 30,858,569 bytes, 672,736 records/sec, 1,028,583 bytes/sec.
-    //     ReadAll: 20,182,784 records, 30,858,569 bytes, 7,696,455 records/sec, 11,767,533 bytes/sec.
-    //     SeekMany: 1,232 seeks, 123.1 seeks/sec.
+    //     WriteMany: 20,440,064 records, 31,251,971 bytes, 681,271 records/sec, 1,041,634 bytes/sec.
+    //     ReadAll: 20,440,064 records, 31,251,971 bytes, 7,285,357 records/sec, 11,138,994 bytes/sec.
+    //     SeekMany: 2,830 seeks, 282.9 seeks/sec.
     //   ===[ Chunk Size 64KiB ]===
-    //     WriteMany: 17,516,800 records, 26,642,917 bytes, 583,680 records/sec, 887,773 bytes/sec.
-    //     ReadAll: 17,516,800 records, 26,642,917 bytes, 7,972,044 records/sec, 12,125,418 bytes/sec.
-    //     SeekMany: 1,821 seeks, 182.1 seeks/sec.
+    //     WriteMany: 17,672,448 records, 26,879,680 bytes, 589,002 records/sec, 895,869 bytes/sec.
+    //     ReadAll: 17,672,448 records, 26,879,680 bytes, 7,369,193 records/sec, 11,208,496 bytes/sec.
+    //     SeekMany: 3,308 seeks, 330.8 seeks/sec.
     //   ===[ Chunk Size 128KiB ]===
-    //     WriteMany: 24,147,712 records, 36,644,234 bytes, 804,683 records/sec, 1,221,109 bytes/sec.
-    //     ReadAll: 24,147,712 records, 36,644,234 bytes, 5,146,398 records/sec, 7,809,676 bytes/sec.
-    //     SeekMany: 1,938 seeks, 193.7 seeks/sec.
+    //     WriteMany: 23,414,272 records, 35,531,231 bytes, 780,332 records/sec, 1,184,156 bytes/sec.
+    //     ReadAll: 23,414,272 records, 35,531,231 bytes, 5,883,151 records/sec, 8,927,700 bytes/sec.
+    //     SeekMany: 2,422 seeks, 242.1 seeks/sec.
+    //   ===[ Chunk Size 4096KiB ]===
+    //     WriteMany: 28,679,424 records, 43,428,666 bytes, 948,831 records/sec, 1,436,796 bytes/sec.
+    //     ReadAll: 28,679,424 records, 43,428,666 bytes, 11,428,408 records/sec, 17,305,805 bytes/sec.
+    //     SeekMany: 379 seeks, 37.8 seeks/sec.
     static async Task RunBenchmarks() {
-      foreach (int chunkSizeKiB in new[] { 0, 32, 64, 128 }) {
+      foreach (int chunkSizeKiB in new[] { 0, 32, 64, 128, 4 << 10 }) {
         Console.WriteLine("===[ Chunk Size {0}KiB ]===", chunkSizeKiB);
         string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try {
