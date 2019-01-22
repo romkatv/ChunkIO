@@ -23,6 +23,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
+  using static Format;
+
   class InputChunk : MemoryStream {
     public InputChunk(long beginPosition, long endPosition, UserData userData) {
       BeginPosition = beginPosition;
@@ -61,7 +63,7 @@ namespace ChunkIO {
       if (right == null) return await MakeChunk(left, Scan.None);
       if (!pred.Invoke(right.UserData)) return await MakeChunk(right, Scan.Backward);
       while (true) {
-        IChunk mid = await ReadMiddle(left.EndPosition, right.BeginPosition);
+        IChunk mid = await _reader.ReadMiddleAsync(left.EndPosition, right.BeginPosition);
         if (mid == null) return await MakeChunk(left, Scan.Backward) ?? await MakeChunk(left, Scan.Forward);
         if (pred.Invoke(mid.UserData)) {
           right = mid;
@@ -79,13 +81,6 @@ namespace ChunkIO {
     public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => RemoteFlush.FlushAsync(Name, flushToDisk);
 
     public void Dispose() => _reader.Dispose();
-
-    async Task<IChunk> ReadMiddle(long from, long to) {
-      if (to <= from) return null;
-      if (to == from + 1) return await _reader.ReadFirstAsync(from, to);
-      long mid = from + (to - from) / 2;
-      return await _reader.ReadFirstAsync(mid, to) ?? await _reader.ReadLastAsync(from, mid);
-    }
 
     enum Scan {
       None,

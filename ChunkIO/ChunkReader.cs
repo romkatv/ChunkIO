@@ -111,9 +111,32 @@ namespace ChunkIO {
       }
     }
 
+    // Returns any chunk whose ChunkBeginPosition is in [from, to) or null. Prefers to pick the
+    // chunk close to the middle of the range.
+    //
+    // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
+    public async Task<IChunk> ReadMiddleAsync(long from, long to) {
+      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      if (to / MeterInterval > from / MeterInterval) {
+        long mid = from + (to - from) / 2;
+        mid = Math.Min(MeterBefore(to), MeterAfter(mid));
+        Debug.Assert(mid >= from && mid <= to);
+        Meter? meter = await ReadMeter(mid);
+        if (meter.HasValue) {
+          long pos = meter.Value.ChunkBeginPosition;
+          if (pos >= from && pos < to) {
+            ChunkHeader? header = await ReadChunkHeader(pos);
+            if (header.HasValue) return new Chunk(this, pos, header.Value);
+          }
+        }
+      }
+      return await ReadFirstAsync(from, to);
+    }
+
     public void Dispose() => _reader.Dispose();
 
     static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
+    static long MeterAfter(long pos) => MeterBefore(pos + MeterInterval - 1);
 
     async Task<Meter?> ReadMeter(long pos) {
       Debug.Assert(pos >= 0 && pos % MeterInterval == 0);
