@@ -44,6 +44,7 @@ namespace ChunkIO {
     }
 
     public string Name => _reader.Name;
+    public long Length => _reader.Length;
 
     // In order:
     //

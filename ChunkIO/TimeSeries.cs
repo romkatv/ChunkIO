@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -45,6 +46,14 @@ namespace ChunkIO {
 
     // Decodes a non-first value of the chunk. It was encoded by EncodeSecondary().
     bool DecodeSecondary(Stream strm, out T val);
+  }
+
+  // Data from a signle chunk. Not empty. The first element is "primary", the rest are "secondary".
+  public interface IDecodedChunk<out T> : IEnumerable<T> {
+    // Starting file position of the chunk.
+    long BeginPosition { get; }
+    // Past-the-end file position of the chunk.
+    long EndPosition { get; }
   }
 
   // Writer for timestamped records.
@@ -188,8 +197,11 @@ namespace ChunkIO {
       Decoder = decoder;
     }
 
+    public string Name => _reader.Name;
+    public long Length => _reader.Length;
+
     // Methods of the decoder can be called from arbitrary threads between the calll to
-    // IAsyncEnumerator<IEnumerable<T>>.MoveNextAsync() and the completion of the task it returns.
+    // IAsyncEnumerator<IDecodedChunk<T>>.MoveNextAsync() and the completion of the task it returns.
     // The enumerator is from ReadAfter().GetAsyncEnumerator().
     public ITimeSeriesDecoder<T> Decoder { get; }
 
@@ -201,7 +213,7 @@ namespace ChunkIO {
     // This method can be called concurrently with any other method and with itself.
     public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
 
-    // Reads timestamped records from the file and returns them one chunk at a time. Each IEnumerable<T>
+    // Reads timestamped records from the file and returns them one chunk at a time. Each IDecodedChunk<T>
     // corresponds to a single chunk, the first element being "primary" and the rest "secondary".
     //
     // Chunks whose successor's primary record's timestamp is not greater than t are not read.
@@ -209,8 +221,8 @@ namespace ChunkIO {
     // just the last chunk.
     //
     // The caller doesn't have to iterate over all chunks (that is, over the whole IAsyncEnumerable) or
-    // over all records in a chunk (over IEnumerable<T>). It's OK to stop iterating half-way.
-    public IAsyncEnumerable<IEnumerable<T>> ReadAfter(DateTime t) => new Chunks(this, t);
+    // over all records in a chunk (over IDecodedChunk<T>). It's OK to stop iterating half-way.
+    public IAsyncEnumerable<IDecodedChunk<T>> ReadAfter(DateTime t) => new Chunks(this, t);
 
     public void Dispose() => Dispose(true);
 
@@ -226,13 +238,28 @@ namespace ChunkIO {
       }
     }
 
-    static IEnumerable<T> DecodeChunk(InputChunk chunk, ITimeSeriesDecoder<T> decoder) {
-      decoder.DecodePrimary(chunk, new DateTime(chunk.UserData.Long0, DateTimeKind.Utc), out T val);
-      yield return val;
-      while (decoder.DecodeSecondary(chunk, out val)) yield return val;
+    class TimeSeriesChunk : IDecodedChunk<T> {
+      readonly IEnumerable<T> _data;
+
+      public TimeSeriesChunk(InputChunk chunk, ITimeSeriesDecoder<T> decoder) {
+        BeginPosition = chunk.BeginPosition;
+        EndPosition = chunk.EndPosition;
+        _data = Decode();
+
+        IEnumerable<T> Decode() {
+          decoder.DecodePrimary(chunk, new DateTime(chunk.UserData.Long0, DateTimeKind.Utc), out T val);
+          yield return val;
+          while (decoder.DecodeSecondary(chunk, out val)) yield return val;
+        }
+      }
+
+      public long BeginPosition { get; }
+      public long EndPosition { get; }
+      public IEnumerator<T> GetEnumerator() => _data.GetEnumerator();
+      IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    class ChunkEnumerator : IAsyncEnumerator<IEnumerable<T>> {
+    class ChunkEnumerator : IAsyncEnumerator<IDecodedChunk<T>> {
       readonly TimeSeriesReader<T> _reader;
       readonly DateTime _after;
       InputChunk _chunk = null;
@@ -244,7 +271,7 @@ namespace ChunkIO {
         _after = after;
       }
 
-      public IEnumerable<T> Current { get; internal set; }
+      public IDecodedChunk<T> Current { get; internal set; }
 
       public async Task<bool> MoveNextAsync(CancellationToken cancel) {
         if (_done) return false;
@@ -260,7 +287,7 @@ namespace ChunkIO {
           _done = true;
           return false;
         } else {
-          Current = DecodeChunk(_chunk, _reader.Decoder);
+          Current = new TimeSeriesChunk(_chunk, _reader.Decoder);
           _next = _chunk.EndPosition;
           return true;
         }
@@ -276,7 +303,7 @@ namespace ChunkIO {
       public void Dispose() => Reset();
     }
 
-    class Chunks : IAsyncEnumerable<IEnumerable<T>> {
+    class Chunks : IAsyncEnumerable<IDecodedChunk<T>> {
       readonly TimeSeriesReader<T> _reader;
       readonly DateTime _after;
 
@@ -285,7 +312,7 @@ namespace ChunkIO {
         _after = after;
       }
 
-      public IAsyncEnumerator<IEnumerable<T>> GetAsyncEnumerator() => new ChunkEnumerator(_reader, _after);
+      public IAsyncEnumerator<IDecodedChunk<T>> GetAsyncEnumerator() => new ChunkEnumerator(_reader, _after);
     }
   }
 }

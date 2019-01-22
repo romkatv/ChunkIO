@@ -105,8 +105,9 @@ namespace ChunkIO.Test {
       using (var reader = new Reader(fname)) {
         var stats = new ReadStats();
         long lastLen = -1;
-        IAsyncEnumerable<IEnumerable<Event<long>>> chunks = reader.ReadAfter(new DateTime(after, DateTimeKind.Utc));
-        using (IAsyncEnumerator<IEnumerable<Event<long>>> iter = chunks.GetAsyncEnumerator()) {
+        IAsyncEnumerable<IDecodedChunk<Event<long>>> chunks =
+            reader.ReadAfter(new DateTime(after, DateTimeKind.Utc));
+        using (IAsyncEnumerator<IDecodedChunk<Event<long>>> iter = chunks.GetAsyncEnumerator()) {
           while (await Do(() => iter.MoveNextAsync(CancellationToken.None))) {
             Event<long>[] events = iter.Current.ToArray();
             for (int i = 0; i != events.Length; ++i) {

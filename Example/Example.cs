@@ -179,14 +179,14 @@ namespace ChunkIO.Example {
         // doesn't hurt.
         await reader.FlushRemoteWriterAsync(flushToDisk: false);
         // Now read order books one chunk at a time.
-        await reader.ReadAfter(from).ForEachAsync(ProcessChunks);
+        await reader.ReadAfter(from).ForEachAsync(ProcessEvents);
       }
 
-      Task ProcessChunks(IEnumerable<Event<PriceLevel[]>> chunks) {
+      Task ProcessEvents(IDecodedChunk<Event<PriceLevel[]>> events) {
         // Our encoder and decoder guarantee that every chunk has at least one event, the first is
         // always a snapshot and the rest are always patches.
         bool isPrimary = true;
-        foreach (Event<PriceLevel[]> e in chunks) {
+        foreach (Event<PriceLevel[]> e in events) {
           Console.WriteLine("  {0}: {1}", isPrimary ? "Snapshot" : "Patch   ", Print(e));
           isPrimary = false;
         }
