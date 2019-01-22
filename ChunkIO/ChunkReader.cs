@@ -44,39 +44,6 @@ namespace ChunkIO {
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 
-    // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
-    // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
-    public async Task<IChunk> ReadLastAsync(long from, long to) {
-      if (to <= 0) return null;
-      for (long m = MeterBefore(Math.Min(to - 1, _reader.Length)); m >= 0 && from < to; m -= MeterInterval) {
-        Debug.Assert(m < to);
-        Meter? meter = await ReadMeter(m);
-        if (!meter.HasValue) continue;
-        IChunk res = await Scan(meter.Value.ChunkBeginPosition);
-        if (res != null) return res;
-        Debug.Assert(MeterBefore(meter.Value.ChunkBeginPosition) <= m);
-        m = MeterBefore(meter.Value.ChunkBeginPosition);
-        to = meter.Value.ChunkBeginPosition;
-      }
-      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
-      // be able to get to them by scanning from the last known valid chunk in [0, from].
-      return from < to ? await Scan(_last <= from ? _last : 0) : null;
-
-      async Task<IChunk> Scan(long h) {
-        ChunkHeader? res = null;
-        while (true) {
-          Debug.Assert(h < to);
-          ChunkHeader? header = await ReadChunkHeader(h);
-          if (!header.HasValue) break;
-          if (h >= from) res = header;
-          long next = header.Value.EndPosition(h).Value;
-          if (next >= to) break;
-          h = next;
-        }
-        return res.HasValue ? new Chunk(this, h, res.Value) : null;
-      }
-    }
-
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
@@ -108,6 +75,39 @@ namespace ChunkIO {
           h = next;
         }
         return null;
+      }
+    }
+
+    // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
+    // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
+    public async Task<IChunk> ReadLastAsync(long from, long to) {
+      if (to <= 0) return null;
+      for (long m = MeterBefore(Math.Min(to - 1, _reader.Length)); m >= 0 && from < to; m -= MeterInterval) {
+        Debug.Assert(m < to);
+        Meter? meter = await ReadMeter(m);
+        if (!meter.HasValue) continue;
+        IChunk res = await Scan(meter.Value.ChunkBeginPosition);
+        if (res != null) return res;
+        Debug.Assert(MeterBefore(meter.Value.ChunkBeginPosition) <= m);
+        m = MeterBefore(meter.Value.ChunkBeginPosition);
+        to = meter.Value.ChunkBeginPosition;
+      }
+      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
+      // be able to get to them by scanning from the last known valid chunk in [0, from].
+      return from < to ? await Scan(_last <= from ? _last : 0) : null;
+
+      async Task<IChunk> Scan(long h) {
+        ChunkHeader? res = null;
+        while (true) {
+          Debug.Assert(h < to);
+          ChunkHeader? header = await ReadChunkHeader(h);
+          if (!header.HasValue) break;
+          if (h >= from) res = header;
+          long next = header.Value.EndPosition(h).Value;
+          if (next >= to) break;
+          h = next;
+        }
+        return res.HasValue ? new Chunk(this, h, res.Value) : null;
       }
     }
 
