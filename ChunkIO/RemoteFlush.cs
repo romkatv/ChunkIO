@@ -57,19 +57,15 @@ namespace ChunkIO {
           await s_connect.WaitAsync();
           try {
             // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
-            // we have verified its existence and our attempt to connect to it. Plus, we cannot use a long
-            // timeout because ConnectAsync() uses busy-waiting. The latter is also a reason why we use
-            // a semaphore to restrict the number of simultaneous ConnectAsync(). Without he semaphore
-            // we can block all task threads with useless busy waiting.
-            await pipe.ConnectAsync(50);
-          } catch (Exception e) {
-            if (e is TimeoutException || e is IOException) {
-              // Sleep while still holding the semaphore. This is to avoid using a whole core on the busy
-              // waiting in WaitAsync().
-              await Task.Delay(250);
-              continue;
-            }
-            throw;
+            // we have verified its existence and our attempt to connect to it. We use a semaphore to
+            // restrict the number of simultaneous ConnectAsync() because ConnectAsync() blocks a task
+            // thread for the whole duration of its execution. Without the semaphore, WaitAsync() calls
+            // could block all task threads.
+            await pipe.ConnectAsync(100);
+          } catch (TimeoutException) {
+            continue;
+          } catch (IOException) {
+            continue;
           } finally {
             s_connect.Release();
           }
