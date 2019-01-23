@@ -39,7 +39,7 @@ namespace ChunkIO {
       if (offset < 0 || count < 0 || array.Length - offset < count) {
         throw new Exception($"Invalid range for array of length {array.Length}: [{offset}, {offset} + {count})");
       }
-      if (count > MaxContentLength) throw new Exception($"Record too big: {count}");
+      if (count > MaxContentLength) throw new Exception($"Chunk too big: {count}");
       if (_torn) {
         await WritePadding();
         _torn = false;
