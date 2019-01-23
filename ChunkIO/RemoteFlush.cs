@@ -38,7 +38,7 @@ namespace ChunkIO {
     //   * The remote writer failed to flush because disk is full.
     //   * The remote writer sent invalid response to our request.
     //   * Pipe permission error.
-    public static async Task<long?> FlushAsync(string fname, bool flushToDisk, int id = 0) {
+    public static async Task<long?> FlushAsync(string fname, bool flushToDisk) {
       if (fname == null) throw new ArgumentNullException(nameof(fname));
       while (true) {
         using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
