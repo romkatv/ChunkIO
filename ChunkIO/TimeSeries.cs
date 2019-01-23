@@ -79,6 +79,9 @@ namespace ChunkIO {
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
         : this(fname, encoder, new WriterOptions()) { }
 
+    public string Name => _writer.Name;
+    public long Length => _writer.Length;
+
     // Methods of the encoder can be called from arbitrary threads between the calll to Write() and
     // the completion of the task it returns.
     public ITimeSeriesEncoder<T> Encoder { get; }
@@ -206,12 +209,17 @@ namespace ChunkIO {
     public ITimeSeriesDecoder<T> Decoder { get; }
 
     // If there a writer writing to our file and it's running on the same machine, tells it to flush,
-    // waits for completion and returns true. Otherwise returns false.
+    // waits for completion and returns the size of the file immediately after flushing. Otherwise returns
+    // the current file size.
     //
     // Throws if the writer is unable to flush (e.g., disk full).
     //
     // This method can be called concurrently with any other method and with itself.
-    public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
+    //
+    // The implication is that all existing chunks with starting positions in
+    // [0, FlushRemoteWriterAsync(flushToDisk).Result) are guaranteed to be final and no new chunks will
+    // appear there.
+    public Task<long> FlushRemoteWriterAsync(bool flushToDisk) => _reader.FlushRemoteWriterAsync(flushToDisk);
 
     // Reads timestamped records from the file and returns them one chunk at a time. Each IDecodedChunk<T>
     // corresponds to a single chunk, the first element being "primary" and the rest "secondary".

@@ -169,11 +169,18 @@ namespace ChunkIO {
       _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
       _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
       if (_opt.AllowRemoteFlush) {
-        _listener = RemoteFlush.CreateListener(fname, FlushAsync);
+        _listener = RemoteFlush.CreateListener(fname, (bool flushToDisk) => {
+          Debug.Assert(!_disposed);
+          return _sem.WithLock(async () => {
+            await DoCloseChunk(flushToDisk);
+            return _writer.Length;
+          });
+        });
       }
     }
 
     public string Name => _writer.Name;
+    public long Length => _writer.Length;
 
     // If there is a current chunk, locks and returns it. IOutputChunk.IsNew is false.
     // Otherwise creates a new chunk, locks and returns it. IOutputChunk.IsNew is true.

@@ -183,7 +183,7 @@ namespace ChunkIO.Example {
     // smaller than the specified time. In other words, it reads all order books after `from` and
     // perhaps a little bit extra before that.
     static async Task ReadOrderBooks(string fname, DateTime from) {
-      Console.WriteLine("Reading order books starting from {1:yyyy-MM-dd HH:mm}", fname, from);
+      Console.WriteLine("Reading order books starting from {0:yyyy-MM-dd HH:mm}", from);
       using (var reader = new OrderBookReader(fname)) {
         // It's a good idea to ask potential writers that might be writing to our file right now to
         // flush their buffers. There are no writers in this example at this point but this call
@@ -197,31 +197,27 @@ namespace ChunkIO.Example {
       }
     }
 
-    // Advanced two-step method of reading ChunkIO files while another process is writing to them.
-    // The goal is to miss as little data as possible.
-    static async Task ReadOrderBooksTwoStep(string fname, DateTime from) {
-      Console.WriteLine("Reading order books in two steps starting from {1:yyyy-MM-dd HH:mm}", fname, from);
+    // Advanced method of incrementally reading ChunkIO files while another process is writing to them.
+    // It ensures that all data we are interested in is read exactly once and no data is ever missed.
+    static async Task ReadOrderBooksIncremental(string fname, DateTime from) {
       using (var reader = new OrderBookReader(fname)) {
-        // Flush twice to ensure that all chunks with begin file positions in [0, length) are complete.
-        await reader.FlushRemoteWriterAsync(flushToDisk: false);
-        long length = reader.Length;
-        await reader.FlushRemoteWriterAsync(flushToDisk: false);
-        // Scan the data we are interested in but ignore all chunks that start outside of [0, length).
-        // Remember the end position of the last chunk.
-        long end = 0;
-        await reader.ReadAfter(from, 0, length).ForEachAsync((chunk) => {
-          PrintChunk(chunk);
-          end = chunk.EndPosition;
-          return Task.CompletedTask;
-        });
-        // Flush and then scan the rest of the data. Unlike the first scan, this one shouldn't take long
-        // because we only need to process what has been produced by the writer while we were working on
-        // the bulk of the data.
-        await reader.FlushRemoteWriterAsync(flushToDisk: false);
-        await reader.ReadAfter(DateTime.MinValue, length, long.MaxValue).ForEachAsync((chunk) => {
-          PrintChunk(chunk);
-          return Task.CompletedTask;
-        });
+        long startPosition = 0;
+        // The first iteration of this loop reads all available data in file (subject to time constraints).
+        // The second iteration reads all extra data that might have been written in the meantime. In this
+        // example no data gets written in the meantime, so the second iteration reads nothing.
+        for (int i = 0; i != 2; ++i) {
+          long endPosition = await reader.FlushRemoteWriterAsync(flushToDisk: false);
+          Console.WriteLine("Reading order books in [{0}, {1}) starting from {2:yyyy-MM-dd HH:mm}",
+                            startPosition, endPosition, from);
+          // Scan the data we are interested in but ignore all chunks that start outside of
+          // [startPosition, endPosition).It's guaranteed that new data cannot appear in the
+          // [0, startPosition) range, which we are skipping here.
+          await reader.ReadAfter(from, startPosition, endPosition).ForEachAsync((chunk) => {
+            PrintChunk(chunk);
+            startPosition = chunk.EndPosition;
+            return Task.CompletedTask;
+          });
+        }
       }
     }
 
@@ -273,7 +269,7 @@ namespace ChunkIO.Example {
         ReadOrderBooks(fname, DateTime.MaxValue).Wait();
         Console.WriteLine();
         // ReadOrderBooksTwoStep() will read the same data as ReadOrderBooks() because there are no writers.
-        ReadOrderBooksTwoStep(fname, T0 + TimeSpan.FromMinutes(3)).Wait();
+        ReadOrderBooksIncremental(fname, T0 + TimeSpan.FromMinutes(3)).Wait();
         return 0;
       } catch (Exception e) {
         Console.Error.WriteLine("Error: {0}", e);

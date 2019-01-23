@@ -30,13 +30,13 @@ namespace ChunkIO.Test {
     public void SmokeTest() {
       var flushes = new List<bool>();
       using (var listener = RemoteFlush.CreateListener("test", Flush)) {
-        Assert.IsTrue(RemoteFlush.FlushAsync("test", true).Result);
+        Assert.AreEqual(42, RemoteFlush.FlushAsync("test", true).Result);
       }
       Assert.AreEqual(1, flushes.Count);
       Assert.IsTrue(flushes[0]);
-      Task Flush(bool flushToDisk) {
+      Task<long> Flush(bool flushToDisk) {
         flushes.Add(flushToDisk);
-        return Task.CompletedTask;
+        return Task.FromResult<long>(42);
       }
     }
   }

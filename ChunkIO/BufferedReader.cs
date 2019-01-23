@@ -84,7 +84,11 @@ namespace ChunkIO {
     public async Task<InputChunk> ReadNextAsync(long from, long to) =>
         await MakeChunk(await _reader.ReadFirstAsync(from, to), Scan.Forward, from, to);
 
-    public Task<bool> FlushRemoteWriterAsync(bool flushToDisk) => RemoteFlush.FlushAsync(Name, flushToDisk);
+    public async Task<long> FlushRemoteWriterAsync(bool flushToDisk) {
+      long len = Length;
+      long? res = await RemoteFlush.FlushAsync(Name, flushToDisk);
+      return res ?? len;
+    }
 
     public void Dispose() => _reader.Dispose();
 

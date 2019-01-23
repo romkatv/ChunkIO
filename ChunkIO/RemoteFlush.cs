@@ -27,15 +27,16 @@ namespace ChunkIO {
   static class RemoteFlush {
     // Returns:
     //
-    //   * false if there is no listener associated with the file.
-    //   * true if there is a listener and the file was successfully flushed.
+    //   * null if there is no listener associated with the file.
+    //   * file length immediately after flushing (the flushing and the grabbing of the file length are
+    //     done atomically) if there is a listener and the file was successfully flushed.
     //
     // Throws in all other cases. For example:
     //
     //   * The remote writer failed to flush because disk is full.
     //   * The remote writer sent invalid response to our request.
     //   * Pipe permission error.
-    public static async Task<bool> FlushAsync(string fname, bool flushToDisk) {
+    public static async Task<long?> FlushAsync(string fname, bool flushToDisk) {
       if (fname == null) throw new ArgumentNullException(nameof(fname));
       while (true) {
         using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
@@ -45,7 +46,7 @@ namespace ChunkIO {
           // a file existence check and a loop. Unfortunately, this existence check has a side effect of
           // creating a client pipe connection. This is why our server has to handle connections that don't
           // write any data.
-          if (!File.Exists(@"\\.\pipe\" + PipeNameFromFile(fname))) return false;
+          if (!File.Exists(@"\\.\pipe\" + PipeNameFromFile(fname))) return null;
           try {
             // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
             // we have verified its existence and our attempt to connect to it.
@@ -55,26 +56,24 @@ namespace ChunkIO {
           } catch (IOException) {
             continue;
           }
-          var buf = new byte[1] { (byte)(flushToDisk ? 1 : 0) };
+          var buf = new byte[UInt64LE.Size];
+          if (flushToDisk) buf[0] = 1;
           try {
             await pipe.WriteAsync(buf, 0, 1);
-            if (await pipe.ReadAsync(buf, 0, 1) != 1) continue;
+            if (await pipe.ReadAsync(buf, 0, UInt64LE.Size) != UInt64LE.Size) continue;
           } catch {
             continue;
           }
-          switch (buf[0]) {
-            case 0:
-              throw new IOException($"Remote writer failed to Flush: {fname}");
-            case 1:
-              return true;
-            default:
-              throw new Exception("Invalid Flush response");
-          }
+          int offset = 0;
+          ulong res = UInt64LE.Read(buf, ref offset);
+          if (res < long.MaxValue) return (long)res;
+          if (res == ulong.MaxValue) throw new IOException($"Remote writer failed to Flush: {fname}");
+          throw new Exception($"Invalid Flush response: {res}");
         }
       }
     }
 
-    public static IDisposable CreateListener(string fname, Func<bool, Task> flush) => new Listener(fname, flush);
+    public static IDisposable CreateListener(string fname, Func<bool, Task<long>> flush) => new Listener(fname, flush);
 
     static string HexLowerCase(byte[] bytes) {
       return string.Join("", bytes.Select(b => b.ToString("x2")));
@@ -90,20 +89,23 @@ namespace ChunkIO {
     sealed class Listener : IDisposable {
       readonly PipeServer _srv;
 
-      public Listener(string fname, Func<bool, Task> flush) {
+      public Listener(string fname, Func<bool, Task<long>> flush) {
         _srv = new PipeServer(PipeNameFromFile(fname), 4, async (Stream strm, CancellationToken cancel) => {
-          var buf = new byte[1];
+          var buf = new byte[UInt64LE.Size];
           // Comments in RemoteFlush.FlushAsync() explanain why there may be no data in the stream.
           if (await strm.ReadAsync(buf, 0, 1, cancel) != 1) return;
           if (buf[0] != 0 && buf[0] != 1) throw new Exception("Invalid Flush request");
           bool flushToDisk = buf[0] == 1;
           try {
-            await flush.Invoke(flushToDisk);
-            buf[0] = 1;
+            long len = await flush.Invoke(flushToDisk);
+            Debug.Assert(len >= 0);
+            int offset = 0;
+            UInt64LE.Write(buf, ref offset, (ulong)len);
           } catch {
-            buf[0] = 0;
+            int offset = 0;
+            UInt64LE.Write(buf, ref offset, ulong.MaxValue);
           }
-          await strm.WriteAsync(buf, 0, 1, cancel);
+          await strm.WriteAsync(buf, 0, UInt64LE.Size, cancel);
         });
       }
 

@@ -32,6 +32,7 @@ namespace ChunkIO {
     }
 
     public string Name => _writer.Name;
+    public long Length => _writer.Position;
 
     public async Task WriteAsync(UserData userData, byte[] array, int offset, int count) {
       if (array == null) throw new ArgumentNullException(nameof(array));
