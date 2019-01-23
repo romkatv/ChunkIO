@@ -34,6 +34,7 @@ namespace ChunkIO.Example {
     // If Price < 0, it's an ask (limit sell order) with price equal to -Price.
     // Otherwise it's a bid (limit buy order).
     public decimal Price { get; }
+    // Non-negative. Zero size means there are no orders at the specified price.
     public decimal Size { get; }
 
     public override string ToString() => $"{(Price < 0 ? "sell" : "buy ")} {Size} @ {Math.Abs(Price)}";
@@ -41,15 +42,15 @@ namespace ChunkIO.Example {
 
   // Helper class for building order books out of patches.
   class OrderBook {
-    Dictionary<decimal, decimal> _levels = new Dictionary<decimal, decimal>();
+    Dictionary<decimal, decimal> _book = new Dictionary<decimal, decimal>();
 
-    public PriceLevel[] GetSnapshot() =>
-        _levels.Select(kv => new PriceLevel(price: kv.Key, size: kv.Value)).ToArray();
+    public PriceLevel[] GetSnapshot() => _book.Select(kv => new PriceLevel(kv.Key, kv.Value)).ToArray();
 
-    public void ApplyPatch(PriceLevel[] patch) {
-      foreach (PriceLevel lvl in patch) _levels[lvl.Price] = lvl.Size;
-      foreach (PriceLevel lvl in patch) {
-        if (_levels.TryGetValue(lvl.Price, out decimal size) && size == 0) _levels.Remove(lvl.Price);
+    public void ApplyPatch(PriceLevel patch) {
+      if (patch.Size == 0) {
+        _book.Remove(patch.Price);
+      } else {
+        _book[patch.Price] = patch.Size;
       }
     }
   }
@@ -61,7 +62,7 @@ namespace ChunkIO.Example {
     protected override void Encode(BinaryWriter writer, PriceLevel[] levels, bool isPrimary) {
       // Here we are encoding data differently depending on isPrimary but this isn't a requirement.
       // For example, it makes sense to encode trades the same way regardless of isPrimary.
-      _book.ApplyPatch(levels);
+      foreach (PriceLevel lvl in levels) _book.ApplyPatch(lvl);
       if (isPrimary) levels = _book.GetSnapshot();
       writer.Write(levels.Length);
       foreach (PriceLevel lvl in levels) {
