@@ -61,6 +61,7 @@ namespace ChunkIO.Test {
           await Write(writer, Content(1, count: 1));
         }
         byte[] chunkio = File.ReadAllBytes(fname);
+        CollectionAssert.AreEqual(FileHeader, chunkio.Take(FileHeader.Length).ToArray());
         File.Delete(fname);
         using (var writer = new ChunkWriter(fname)) {
           await Write(writer, Content(1, count: MeterInterval));
