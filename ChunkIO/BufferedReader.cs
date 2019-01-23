@@ -63,11 +63,11 @@ namespace ChunkIO {
       if (pred == null) throw new ArgumentNullException(nameof(pred));
       IChunk left = await _reader.ReadFirstAsync(from, to);
       if (left == null || pred.Invoke(left.UserData)) return await MakeChunk(left, Scan.Forward, from, to);
-      IChunk right = await _reader.ReadLastAsync(left.EndPosition, to);
+      IChunk right = await _reader.ReadLastAsync(left.BeginPosition + 1, to);
       if (right == null) return await MakeChunk(left, Scan.None, from, to);
       if (!pred.Invoke(right.UserData)) return await MakeChunk(right, Scan.Backward, from, to);
       while (true) {
-        IChunk mid = await _reader.ReadMiddleAsync(left.EndPosition, right.BeginPosition);
+        IChunk mid = await _reader.ReadMiddleAsync(left.BeginPosition + 1, right.BeginPosition);
         if (mid == null) {
           return await MakeChunk(left, Scan.Backward, from, to) ?? await MakeChunk(left, Scan.Forward, from, to);
         }
@@ -107,7 +107,7 @@ namespace ChunkIO {
           case Scan.None:
             return null;
           case Scan.Forward:
-            chunk = await _reader.ReadFirstAsync(chunk.EndPosition, to);
+            chunk = await _reader.ReadFirstAsync(chunk.BeginPosition + 1, to);
             break;
           case Scan.Backward:
             chunk = await _reader.ReadLastAsync(from, chunk.BeginPosition);

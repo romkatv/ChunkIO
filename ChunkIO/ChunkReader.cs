@@ -35,7 +35,7 @@ namespace ChunkIO {
     readonly ByteReader _reader;
     readonly byte[] _meter = new byte[Meter.Size];
     readonly byte[] _header = new byte[ChunkHeader.Size];
-    long _last = 0;
+    Chunk _last = null;
 
     public ChunkReader(string fname) {
       _reader = new ByteReader(fname);
@@ -47,32 +47,35 @@ namespace ChunkIO {
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
-      if (from >= Math.Min(_reader.Length, to)) return null;
-      if (from == _last) {
-        IChunk res = await Scan(from);
+      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      if (from > _last?.BeginPosition && from <= _last?.EndPosition && await _last.IsSkippable()) {
+        IChunk res = await Scan(_last.EndPosition);
         if (res != null) return res;
       }
+      bool meters = false;
       for (long m = MeterBefore(Math.Max(0, from)); m < Math.Min(_reader.Length, to); m += MeterInterval) {
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
+        meters = true;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
       }
+      if (meters) return null;
       // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
       // be able to get to them by scanning from the last chunk in [0, from).
-      IChunk prev = await ReadLastAsync(0, from);
-      return prev == null ? null : await Scan(prev.EndPosition);
+      Chunk prev = (Chunk)await ReadLastAsync(0, from);
+      return prev == null || !await prev.IsSkippable() ? null : await Scan(prev.EndPosition);
 
       async Task<IChunk> Scan(long h) {
         while (h < to) {
           ChunkHeader? header = await ReadChunkHeader(h);
-          if (!header.HasValue) return null;
-          long next = header.Value.EndPosition(h).Value;
+          if (!header.HasValue) break;
           if (h >= from) {
-            _last = next;
-            return new Chunk(this, h, header.Value);
+            _last = new Chunk(this, h, header.Value);
+            return _last;
           }
-          h = next;
+          if (!await IsSkippable(h, header.Value)) break;
+          h = header.Value.EndPosition(h).Value;
         }
         return null;
       }
@@ -81,11 +84,13 @@ namespace ChunkIO {
     // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadLastAsync(long from, long to) {
-      if (to <= 0) return null;
+      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      bool meters = false;
       for (long m = MeterBefore(Math.Min(to - 1, _reader.Length)); m >= 0 && from < to; m -= MeterInterval) {
         Debug.Assert(m < to);
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
+        meters = true;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
         Debug.Assert(MeterBefore(meter.Value.ChunkBeginPosition) <= m);
@@ -93,8 +98,11 @@ namespace ChunkIO {
         to = meter.Value.ChunkBeginPosition;
       }
       // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
-      // be able to get to them by scanning from the last known valid chunk in [0, from].
-      return from < to ? await Scan(_last <= from ? _last : 0) : null;
+      // be able to get to them by scanning from the last known valid chunk in [0, from).
+      if (meters || from >= to) return null;
+      if (from == 0) await Scan(_last?.BeginPosition < to ? _last.BeginPosition : 0);
+      Chunk prev = (Chunk)await ReadLastAsync(0, from);
+      return prev?.EndPosition < to && await prev.IsSkippable() ? await Scan(prev.EndPosition) : null;
 
       async Task<IChunk> Scan(long h) {
         ChunkHeader? res = null;
@@ -105,6 +113,7 @@ namespace ChunkIO {
           if (h >= from) res = header;
           long next = header.Value.EndPosition(h).Value;
           if (next >= to) break;
+          if (!await IsSkippable(h, header.Value)) break;
           h = next;
         }
         return res.HasValue ? new Chunk(this, h, res.Value) : null;
@@ -138,8 +147,19 @@ namespace ChunkIO {
     static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
     static long MeterAfter(long pos) => MeterBefore(pos + MeterInterval - 1);
 
+    async Task<bool> IsSkippable(long begin, ChunkHeader header) {
+      long end = header.EndPosition(begin).Value;
+      if (begin / MeterInterval == (end - 1) / MeterInterval) return true;
+      Meter? meter = await ReadMeter(MeterBefore(end - 1));
+      if (meter.HasValue) return meter.Value.ChunkBeginPosition == begin;
+      var content = new byte[header.ContentLength];
+      long pos = MeteredPosition(begin, ChunkHeader.Size).Value;
+      return await ReadMetered(pos, content, 0, content.Length) && SipHash.ComputeHash(content) == header.ContentHash;
+    }
+
     async Task<Meter?> ReadMeter(long pos) {
       Debug.Assert(pos >= 0 && pos % MeterInterval == 0);
+      if (pos == 0) return new Meter() { ChunkBeginPosition = 0 };
       _reader.Seek(pos);
       if (await _reader.ReadAsync(_meter, 0, _meter.Length) != _meter.Length) return null;
       var res = new Meter();
@@ -177,6 +197,7 @@ namespace ChunkIO {
     sealed class Chunk : IChunk {
       readonly ChunkReader _reader;
       readonly ChunkHeader _header;
+      bool? _skippable = null;
 
       public Chunk(ChunkReader reader, long pos, ChunkHeader header) {
         _reader = reader;
@@ -189,13 +210,19 @@ namespace ChunkIO {
       public int ContentLength => _header.ContentLength;
       public UserData UserData => _header.UserData;
 
+      public async Task<bool> IsSkippable() {
+        if (_skippable == null) _skippable = await _reader.IsSkippable(BeginPosition, _header);
+        return _skippable.Value;
+      }
+
       public async Task<bool> ReadContentAsync(byte[] array, int offset) {
         if (array == null) throw new ArgumentNullException(nameof(array));
         if (offset < 0) throw new ArgumentException($"Negative offset: {offset}");
         if (array.Length - offset < ContentLength)  throw new ArgumentException($"Array too short: {array.Length}");
         long pos = MeteredPosition(BeginPosition, ChunkHeader.Size).Value;
-        return await _reader.ReadMetered(pos, array, offset, ContentLength) &&
-               SipHash.ComputeHash(array, offset, ContentLength) == _header.ContentHash;
+        _skippable = await _reader.ReadMetered(pos, array, offset, ContentLength) &&
+                     SipHash.ComputeHash(array, offset, ContentLength) == _header.ContentHash;
+        return _skippable.Value;
       }
     }
   }
