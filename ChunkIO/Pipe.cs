@@ -32,9 +32,6 @@ namespace ChunkIO {
     // instances that are listening for incoming connections. The total number of instances
     // never exceeds 254, which may or may not be the limit imposed by .NET or Win32 API.
     // The docs are confusing on this matter.
-    //
-    // The pipe is created in the constructor. Thus, as soon as it returns, the existence check
-    // for the pipe file will succeed.
     public PipeServer(string name, int freeInstances, Func<Stream, CancellationToken, Task> handler) {
       const int MaxNamedPipeServerInstances = 254;
       if (name == null) throw new ArgumentNullException(nameof(name));

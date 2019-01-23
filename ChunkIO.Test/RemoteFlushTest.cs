@@ -27,16 +27,64 @@ namespace ChunkIO.Test {
   [TestClass]
   public class RemoteFlushTest {
     [TestMethod]
-    public void SmokeTest() {
+    public void SuccessTest() {
       var flushes = new List<bool>();
-      using (var listener = RemoteFlush.CreateListener("test", Flush)) {
-        Assert.AreEqual(42, RemoteFlush.FlushAsync("test", true).Result);
-      }
-      Assert.AreEqual(1, flushes.Count);
-      Assert.IsTrue(flushes[0]);
       Task<long> Flush(bool flushToDisk) {
         flushes.Add(flushToDisk);
         return Task.FromResult<long>(42);
+      }
+      using (var listener = RemoteFlush.CreateListener("test", Flush)) {
+        Assert.AreEqual(42, RemoteFlush.FlushAsync("test", true).Result);
+        Assert.AreEqual(42, RemoteFlush.FlushAsync("test", false).Result);
+      }
+      CollectionAssert.AreEqual(new bool[] { true, false }, flushes);
+    }
+
+    [TestMethod]
+    public void FailureTest() {
+      Test().Wait();
+      async Task Test() {
+        Task<long> Flush(bool flushToDisk) => throw new NotImplementedException();
+        using (var listener = RemoteFlush.CreateListener("test", Flush)) {
+          try {
+            await RemoteFlush.FlushAsync("test", true);
+            Assert.Fail("Must throw");
+          } catch (IOException) {
+          }
+        }
+      }
+    }
+
+    [TestMethod]
+    public void NoListenerTest() {
+      var flushes = new List<bool>();
+      Assert.AreEqual(new long?(), RemoteFlush.FlushAsync("test", true).Result);
+    }
+
+    [TestMethod]
+    public void ManyFlushesOneFileTest() {
+      async Task Flush() {
+        Assert.AreEqual(42, await RemoteFlush.FlushAsync("test", false));
+      }
+      using (var listener = RemoteFlush.CreateListener("test", _ => Task.FromResult<long>(42))) {
+        Task.WhenAll(Enumerable.Range(0, 2048).Select(_ => Flush())).Wait();
+      }
+    }
+
+    [TestMethod]
+    public void ManyFlushesManyFilesTest() {
+      async Task Flush(int n) {
+        Assert.AreEqual(n, await RemoteFlush.FlushAsync(n.ToString(), false));
+      }
+      var listeners = new List<IDisposable>();
+      try {
+        for (int i = 0; i != 2048; ++i) {
+          int n = i;
+          listeners.Add(RemoteFlush.CreateListener(n.ToString(), _ => Task.FromResult<long>(n)));
+        }
+        Task.WhenAll(Enumerable.Range(0, listeners.Count).Select(Flush)).Wait();
+      } finally {
+        foreach (IDisposable x in listeners) x.Dispose();
       }
     }
   }
