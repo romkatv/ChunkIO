@@ -168,19 +168,10 @@ namespace ChunkIO {
       _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
       _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
       _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
-      if (_opt.AllowRemoteFlush) {
-        _listener = RemoteFlush.CreateListener(fname, (bool flushToDisk) => {
-          Debug.Assert(!_disposed);
-          return _sem.WithLock(async () => {
-            await DoCloseChunk(flushToDisk);
-            return _writer.Length;
-          });
-        });
-      }
+      if (_opt.AllowRemoteFlush) _listener = RemoteFlush.CreateListener(fname, FlushAsync);
     }
 
     public string Name => _writer.Name;
-    public long Length => _writer.Length;
 
     // If there is a current chunk, locks and returns it. IOutputChunk.IsNew is false.
     // Otherwise creates a new chunk, locks and returns it. IOutputChunk.IsNew is true.
@@ -216,9 +207,12 @@ namespace ChunkIO {
 
     // 1. If there is current chunk, waits until it gets unlocked and closes it.
     // 2. Flushes the underlying ChunkWriter.
-    public async Task FlushAsync(bool flushToDisk) {
+    public async Task<long> FlushAsync(bool flushToDisk) {
       if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      await _sem.WithLock(() => DoCloseChunk(flushToDisk));
+      return await _sem.WithLock(async () => {
+        await DoCloseChunk(flushToDisk);
+        return _writer.Length;
+      });
     }
 
     public void Dispose() {

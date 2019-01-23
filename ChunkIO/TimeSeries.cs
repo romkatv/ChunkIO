@@ -80,7 +80,6 @@ namespace ChunkIO {
         : this(fname, encoder, new WriterOptions()) { }
 
     public string Name => _writer.Name;
-    public long Length => _writer.Length;
 
     // Methods of the encoder can be called from arbitrary threads between the calll to Write() and
     // the completion of the task it returns.
