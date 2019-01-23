@@ -31,9 +31,13 @@ Lightly tested (and heavily used in production) on Windows with .NET Framework 4
 
 All numbers are serialized in little-endian format. All hashes are SipHash 2.4.
 
+### File Header
+
+ChunkIO files normally start with "romkatv/chunkio\n" (16 bytes). However, reader doesn't check this, and neither does writer when opening an existing file in append mode.
+
 ### Meter
 
-ChunkIO files have a fixed-size marker called *meter* at every file position divisible by 64K. The first meter is at the beginning of the file.
+ChunkIO files have a fixed-size marker called *meter* at every file position divisible by 64K except zero. Since the meter at position zero wouldn't have any useful information, its space is taken by the file header (see above).
 
 Meter bytes:
 

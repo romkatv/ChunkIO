@@ -80,7 +80,7 @@ namespace ChunkIO {
       while (count > 0) {
         int p = (int)(_writer.Position % MeterInterval);
         if (p == 0) {
-          await _writer.WriteAsync(_meter, 0, _meter.Length);
+          await _writer.WriteAsync(_writer.Position == 0 ? Format.FileHeader : _meter, 0, _meter.Length);
           p += _meter.Length;
         }
         int n = Math.Min(count, MeterInterval - p);

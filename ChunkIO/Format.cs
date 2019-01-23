@@ -51,6 +51,10 @@ namespace ChunkIO {
     public const long MaxPosition = long.MaxValue;
     public const int MeterInterval = 64 << 10;
 
+    public static byte[] FileHeader { get; } = Encoding.UTF8.GetBytes("romkatv/chunkio\n");
+
+    static Format() { Debug.Assert(FileHeader.Length == Meter.Size); }
+
     public static bool IsValidContentLength(int len) => len >= 0;
     public static bool IsValidContentLength(ulong len) => len <= MaxContentLength;
 
