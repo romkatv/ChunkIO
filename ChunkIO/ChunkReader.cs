@@ -35,6 +35,7 @@ namespace ChunkIO {
     readonly ByteReader _reader;
     readonly byte[] _meter = new byte[Meter.Size];
     readonly byte[] _header = new byte[ChunkHeader.Size];
+    // The last chunk read by ReadFirstAsync(). It's used to speed up sequential reads.
     Chunk _last = null;
 
     public ChunkReader(string fname) {
@@ -147,6 +148,19 @@ namespace ChunkIO {
     static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
     static long MeterAfter(long pos) => MeterBefore(pos + MeterInterval - 1);
 
+    // Returns true if it's safe to read the chunk after the specified chunk. There are
+    // two cases where blindly reading the next chunk can backfire:
+    //
+    //   1. By reading the next chunk you'll actually skip valid chunks. So the chunk you'll read
+    //      won't really be the next.
+    //   2. Even if the next chunk decodes correctly (both its header and content hashes match),
+    //      it may be not a real chunk but a part of some larger chunk's content.
+    //
+    // To see these horrors in action, replace the implementation of this method with `return true`
+    // and run tests. TrickyTruncateTest() and TrickyEmbedTest() should fail. They correspond to the
+    // two cases described above. Note that there is no malicious action in these tests. The chunkio
+    // files are produced by ChunkWriter. There are also file truncations, but they can naturally
+    // happen when a processing with ChunkWriter crashes.
     async Task<bool> IsSkippable(long begin, ChunkHeader header) {
       long end = header.EndPosition(begin).Value;
       if (begin / MeterInterval == (end - 1) / MeterInterval) return true;
