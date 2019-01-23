@@ -145,6 +145,9 @@ namespace ChunkIO.Benchmark {
           long written = await WriteMany(fname, chunkSizeBytes: chunkSizeKiB << 10, seconds: 30);
           long read = await ReadAll(fname);
           if (written != read) throw new Exception($"Written {written} but read back {read}");
+          // Note that performance of SeekMany() depends on the file size. The latter, in turn, depends
+          // on the performance of WriteMany(). If you want to compare the performance of two
+          // implementations of seek, you need to bechmark both against the same file.
           await SeekMany(fname, written, seconds: 10);
         } finally {
           if (File.Exists(fname)) File.Delete(fname);
