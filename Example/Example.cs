@@ -198,14 +198,14 @@ namespace ChunkIO.Example {
       }
     }
 
-    // Advanced method of incrementally reading ChunkIO files while another process is writing to them.
+    // Advanced method for incrementally reading ChunkIO files while another process is writing to them.
     // It ensures that all data we are interested in is read exactly once and no data is ever missed.
     static async Task ReadOrderBooksIncremental(string fname, DateTime from) {
       using (var reader = new OrderBookReader(fname)) {
         long startPosition = 0;
-        // The first iteration of this loop reads all available data in file (subject to time constraints).
-        // The second iteration reads all extra data that might have been written in the meantime. In this
-        // example no data gets written in the meantime, so the second iteration reads nothing.
+        // The first iteration of this loop reads all available and relevant data in the file. The second
+        // iteration reads all extra data that might have been written in the meantime. In this example no
+        // data gets written in the meantime, so the second iteration reads nothing.
         for (int i = 0; i != 2; ++i) {
           long endPosition = await reader.FlushRemoteWriterAsync(flushToDisk: false);
           Console.WriteLine("Reading order books in [{0}, {1}) starting from {2:yyyy-MM-dd HH:mm}",
@@ -235,22 +235,23 @@ namespace ChunkIO.Example {
     //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
     //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
     //     Patch   : 00:02 => sell 4 @ 6
-    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //     Snapshot: 00:03 => buy  1 @ 4; sell 2 @ 5; sell 2 @ 6
     //   
     //   Reading order books starting from 2000-01-01 00:02
     //     Snapshot: 00:00 => buy  3 @ 2; buy  1 @ 3; sell 2 @ 5
     //     Patch   : 00:01 => buy  0 @ 3; buy  1 @ 4
     //     Patch   : 00:02 => sell 4 @ 6
-    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //     Snapshot: 00:03 => buy  1 @ 4; sell 2 @ 5; sell 2 @ 6
     //   
     //   Reading order books starting from 2000-01-01 00:03
-    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //     Snapshot: 00:03 => buy  1 @ 4; sell 2 @ 5; sell 2 @ 6
     //   
     //   Reading order books starting from 9999-12-31 23:59
-    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //     Snapshot: 00:03 => buy  1 @ 4; sell 2 @ 5; sell 2 @ 6
     //   
-    //   Reading order books in two steps starting from 2000-01-01 00:03
-    //     Snapshot: 00:03 => sell 2 @ 6; sell 2 @ 5; buy  1 @ 4
+    //   Reading order books in [0, 169) starting from 2000-01-01 00:03
+    //     Snapshot: 00:03 => buy  1 @ 4; sell 2 @ 5; sell 2 @ 6
+    //   Reading order books in [169, 169) starting from 2000-01-01 00:03
     static int Main(string[] args) {
       string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
       try {
