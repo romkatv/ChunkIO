@@ -91,13 +91,13 @@ namespace ChunkIO.Example {
 
     // Returns options for the writer.
     //
-    // The defaults WriterOptions doesn't define any time-based triggers, so it's important to set
+    // The default WriterOptions doesn't define any time-based triggers, so it's important to set
     // them manually. These options are recommended for production use.
     static WriterOptions Opt(string fname) {
       // Guarantees:
       //
       //   * If the writer process terminates unexpectedly, we'll lose at most 1h+5m worth of data.
-      //   * If the OS terminates unexpectedly, we'll lose at most 3h+1h worth of data.
+      //   * If the OS terminates unexpectedly, we'll lose at most 1h+3h worth of data.
       //
       // We flush data more often than necessary with a different factor for every file. This is done
       // to avoid flushing a large number of files at the same time periodically.
@@ -105,9 +105,9 @@ namespace ChunkIO.Example {
       var opt = new WriterOptions();
       // Auto-close chunks older than 1h. This timer starts when a chunk is created.
       opt.CloseChunk.Age = Jitter(TimeSpan.FromHours(1));
-      // Flush all closed chunks older than 5m to OS. This timer when a chunk is closed.
+      // Flush all closed chunks older than 5m to OS. This timer starts when a chunk is closed.
       opt.FlushToOS.Age = Jitter(TimeSpan.FromMinutes(5));
-      // Flush all closed chunks older than 3h to disk. This timer when a chunk is closed.
+      // Flush all closed chunks older than 3h to disk. This timer starts when a chunk is closed.
       opt.FlushToDisk.Age = Jitter(TimeSpan.FromHours(3));
       // Whenever time-based triggers fail, retry them after an hour.
       opt.CloseChunk.AgeRetry = opt.FlushToOS.AgeRetry = opt.FlushToDisk.AgeRetry = Jitter(TimeSpan.FromHours(1));
