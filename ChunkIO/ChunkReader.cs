@@ -42,6 +42,7 @@ namespace ChunkIO {
       _reader = new ByteReader(fname);
     }
 
+    public IReadOnlyCollection<byte> Id => _reader.Id;
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 

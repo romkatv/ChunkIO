@@ -168,9 +168,10 @@ namespace ChunkIO {
       _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
       _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
       _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
-      if (_opt.AllowRemoteFlush) _listener = RemoteFlush.CreateListener(fname, FlushAsync);
+      if (_opt.AllowRemoteFlush) _listener = RemoteFlush.CreateListener(_writer.Id, FlushAsync);
     }
 
+    public IReadOnlyCollection<byte> Id => _writer.Id;
     public string Name => _writer.Name;
 
     // If there is a current chunk, locks and returns it. IOutputChunk.IsNew is false.

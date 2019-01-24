@@ -79,6 +79,7 @@ namespace ChunkIO {
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
         : this(fname, encoder, new WriterOptions()) { }
 
+    public IReadOnlyCollection<byte> Id => _writer.Id;
     public string Name => _writer.Name;
 
     // Methods of the encoder can be called from arbitrary threads between the calll to Write() and
@@ -199,6 +200,7 @@ namespace ChunkIO {
       Decoder = decoder;
     }
 
+    public IReadOnlyCollection<byte> Id => _reader.Id;
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 

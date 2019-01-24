@@ -63,14 +63,22 @@ namespace ChunkIO {
     readonly FileStream _file;
 
     public ByteWriter(string fname) {
-      _file = new FileStream(
-          fname,
-          FileMode.Append,
-          FileAccess.Write,
-          FileShare.Read | FileShare.Delete,
-          bufferSize: 4 << 10,
-          useAsync: true);
+      // See comments in ByteReader's constructor for the explanation of this madness.
+      using (var f = new FileStream(fname, FileMode.OpenOrCreate, FileAccess.Read, FileShare.Read | FileShare.Write)) {
+        Id = FileId.Get(f.SafeFileHandle);
+        _file = new FileStream(
+            fname,
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 4 << 10,
+            useAsync: true);
+      }
     }
+
+    // Returns unique file ID. Two file handles have the same ID if they are attached to the same kernel object.
+    // That is, writes through one handle can be seen through the other.
+    public IReadOnlyCollection<byte> Id { get; }
 
     public string Name => _file.Name;
 

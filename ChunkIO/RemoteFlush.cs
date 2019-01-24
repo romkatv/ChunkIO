@@ -40,10 +40,10 @@ namespace ChunkIO {
     //   * The remote writer failed to flush because disk is full.
     //   * The remote writer sent invalid response to our request.
     //   * Pipe permission error.
-    public static async Task<long?> FlushAsync(string fname, bool flushToDisk) {
-      if (fname == null) throw new ArgumentNullException(nameof(fname));
+    public static async Task<long?> FlushAsync(IReadOnlyCollection<byte> fileId, bool flushToDisk) {
+      if (fileId == null) throw new ArgumentNullException(nameof(fileId));
       while (true) {
-        using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
+        using (var pipe = new NamedPipeClientStream(".", PipeName(fileId), PipeDirection.InOut,
                                                     PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
           // NamedPipeClientStream has an awful API. It doesn't allow us to bail early if there is no pipe and
           // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
@@ -51,7 +51,7 @@ namespace ChunkIO {
           // a marker of the pipe's existence. It's difficult to use the pipe itself as such marker because
           // server pipes disappear after accepting and serving a request and there may be a short gap before
           // we create new server connections.
-          if (Mutex.TryOpenExisting(MutexNameFromFile(fname), MutexRights.Synchronize, out Mutex mutex)) {
+          if (Mutex.TryOpenExisting(MutexName(fileId), MutexRights.Synchronize, out Mutex mutex)) {
             mutex.Dispose();
           } else {
             return null;
@@ -84,34 +84,30 @@ namespace ChunkIO {
           ulong res = UInt64LE.Read(buf, ref offset);
           if (res < long.MaxValue) return (long)res;
           if (res == ulong.MaxValue) {
-            throw new IOException($"Remote writer failed to Flush: {fname}");
+            throw new IOException("Remote writer failed to flush");
           }
           throw new Exception($"Invalid Flush response: {res}");
         }
       }
     }
 
-    public static IDisposable CreateListener(string fname, Func<bool, Task<long>> flush) => new Listener(fname, flush);
+    public static IDisposable CreateListener(IReadOnlyCollection<byte> fileId, Func<bool, Task<long>> flush) =>
+        new Listener(fileId, flush);
 
     static string HexLowerCase(byte[] bytes) {
       return string.Join("", bytes.Select(b => b.ToString("x2")));
     }
 
-    static string PipeNameFromFile(string fname) {
-      using (var md5 = MD5.Create()) {
-        // Note that we assume a case-insensitive file system.
-        string id = Path.GetFullPath(fname).ToLowerInvariant();
-        return "romkatv-chunkio-" + HexLowerCase(md5.ComputeHash(Encoding.UTF8.GetBytes(id)));
-      }
-    }
+    static string PipeName(IReadOnlyCollection<byte> fileId) =>
+        "romkatv-chunkio-" + string.Join("", fileId.Select(b => b.ToString("x2")));
 
-    static string MutexNameFromFile(string fname) => @"Global\" + PipeNameFromFile(fname);
+    static string MutexName(IReadOnlyCollection<byte> fileId) => @"Global\" + PipeName(fileId);
 
     sealed class Listener : IDisposable {
       readonly PipeServer _srv;
       readonly Mutex _mutex;
 
-      public Listener(string fname, Func<bool, Task<long>> flush) {
+      public Listener(IReadOnlyCollection<byte> fileId, Func<bool, Task<long>> flush) {
         // This mutex serves as a marker of the existence of flush listener. RemoteFLush.FlushAsync() looks at it.
         // We allow all authenticated users to access the mutex.
         var security = new MutexSecurity();
@@ -120,9 +116,9 @@ namespace ChunkIO {
                 new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
                 MutexRights.Synchronize,
                 AccessControlType.Allow));
-        _mutex = new Mutex(true, MutexNameFromFile(fname), out bool createdNew, security);
+        _mutex = new Mutex(true, MutexName(fileId), out bool createdNew, security);
         try {
-          _srv = new PipeServer(PipeNameFromFile(fname), 2, async (Stream strm, CancellationToken cancel) => {
+          _srv = new PipeServer(PipeName(fileId), 2, async (Stream strm, CancellationToken cancel) => {
             var buf = new byte[UInt64LE.Size];
             if (await strm.ReadAsync(buf, 0, 1, cancel) != 1) throw new Exception("Empty Flush request");
             if (buf[0] != 0 && buf[0] != 1) throw new Exception("Invalid Flush request");

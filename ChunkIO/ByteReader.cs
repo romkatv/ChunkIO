@@ -60,14 +60,29 @@ namespace ChunkIO {
     readonly FileStream _file;
 
     public ByteReader(string fname) {
-      _file = new FileStream(
+      // We need a file handle from _file to get the unique file ID. If we simply query _file.SafeFileHandle,
+      // _file will remember this and will perform extra checks in most methods, which will significantly slow down
+      // everything ByteReader will do. Hence we create another FileStream from the same file name and get
+      // SafeFileHandle from *that* instance. However, if we aren't careful, the file might be deleted and
+      // recreated in between our two FileStream constructor calls. If this happens, we'll acquire ID of a
+      // different file (even though that file has the same name, it's a different file nonetheless). To avoid
+      // this issue, we create the first FileStream without FileShare.Delete to disallow concurrent file deletions.
+      // After creating the second FileStream, we close the first and once again allow concurrent deletions.
+      using (var f = new FileStream(fname, FileMode.OpenOrCreate, FileAccess.Read, FileShare.Read | FileShare.Write)) {
+        Id = FileId.Get(f.SafeFileHandle);
+        _file = new FileStream(
           fname,
           FileMode.Open,
           FileAccess.Read,
           FileShare.ReadWrite | FileShare.Delete,
           bufferSize: 512,
           useAsync: true);
+      }
     }
+
+    // Returns unique file ID. Two file handles have the same ID if they are attached to the same kernel object.
+    // That is, writes through one handle can be seen through the other.
+    public IReadOnlyCollection<byte> Id { get; }
 
     public string Name => _file.Name;
 

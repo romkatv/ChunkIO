@@ -31,6 +31,7 @@ namespace ChunkIO {
       _writer = new ByteWriter(fname);
     }
 
+    public IReadOnlyCollection<byte> Id => _writer.Id;
     public string Name => _writer.Name;
     public long Length => _writer.Position;
 

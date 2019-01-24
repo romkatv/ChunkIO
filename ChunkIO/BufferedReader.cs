@@ -43,6 +43,7 @@ namespace ChunkIO {
       _reader = new ChunkReader(fname);
     }
 
+    public IReadOnlyCollection<byte> Id => _reader.Id;
     public string Name => _reader.Name;
     public long Length => _reader.Length;
 
@@ -86,7 +87,7 @@ namespace ChunkIO {
 
     public async Task<long> FlushRemoteWriterAsync(bool flushToDisk) {
       long len = Length;
-      long? res = await RemoteFlush.FlushAsync(Name, flushToDisk);
+      long? res = await RemoteFlush.FlushAsync(Id, flushToDisk);
       return res ?? len;
     }
 
