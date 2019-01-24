@@ -18,7 +18,7 @@ namespace ChunkIO {
   //     await t2;
   //     Debug.Assert(t1.IsCompleted);
   //   }
-  public class AsyncMutex {
+  class AsyncMutex {
     readonly object _monitor = new object();
     readonly LinkedList<Task> _waiters = new LinkedList<Task>();
     bool _locked = false;
