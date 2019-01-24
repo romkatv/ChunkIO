@@ -80,6 +80,7 @@ namespace ChunkIO {
 
     public void Seek(long position) {
       ErrorInjector?.Seek(_file, position);
+      if (position == _file.Position) return;
       if (_file.Seek(position, SeekOrigin.Begin) != position) {
         throw new IOException($"Cannot seek to {position}");
       }
