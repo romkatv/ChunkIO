@@ -270,7 +270,7 @@ namespace ChunkIO.Example {
         // Reading from DateTime.MaxValue always gives the very last chunk.
         ReadOrderBooks(fname, DateTime.MaxValue).Wait();
         Console.WriteLine();
-        // ReadOrderBooksTwoStep() will read the same data as ReadOrderBooks() because there are no writers.
+        // ReadOrderBooksIncremental() will read the same data as ReadOrderBooks() because there are no writers.
         ReadOrderBooksIncremental(fname, T0 + TimeSpan.FromMinutes(3)).Wait();
         return 0;
       } catch (Exception e) {
