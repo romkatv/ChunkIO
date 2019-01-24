@@ -233,170 +233,179 @@ namespace ChunkIO.Test {
       }
     }
 
-    [TestMethod]
-    public void WriteAndReadTest() {
-      Task.WhenAll(Tests()).Wait();
-      WithErrorInjection(() => Task.WhenAll(Tests())).Wait();
+    static async Task RunTest(Func<string, Task> action) {
+      await WithFile(action);
+      await WithErrorInjection(() => WithFile(action));
+    }
+
+    static async Task RunTest(Func<string, long, long, Task> action) {
+      await Task.WhenAll(Tests());
+      await WithErrorInjection(() => Task.WhenAll(Tests()));
 
       IEnumerable<Task> Tests() {
-        yield return TestSizeTriggers();
-        yield return TestTimeTriggers();
         for (long bufRecs = 1; bufRecs != 4; ++bufRecs) {
           for (long n = 0; n != 16; ++n) {
-            yield return TestManyRecords(n, bufRecs);
+            yield return WithFile(fname => action.Invoke(fname, n, bufRecs));
           }
         }
         foreach (long bufRecs in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
           foreach (long n in new[] { 1 << 10, 4 << 10, 8 << 10, 16 << 10 }) {
-            yield return TestManyRecords(n, bufRecs);
+            yield return WithFile(fname => action.Invoke(fname, n, bufRecs));
           }
         }
       }
+    }
 
-      async Task TestSizeTriggers() {
-        await WithFile(TestCloseChunk);
-
-        async Task TestCloseChunk(string fname) {
-          var opt = new WriterOptions() {
-            CloseChunk = new Triggers() { Size = 0 },
-            FlushToOS = new Triggers() { Size = 0 },
-          };
-          using (var writer = new Writer(fname, opt)) {
-            while (true) {
-              try {
-                long n = writer.RecordsWritten + 1;
-                await writer.Write(new Event<long>(new DateTime(n, DateTimeKind.Utc), n));
-                break;
-              } catch (InjectedWriteException) {
-              }
+    [TestMethod]
+    public void SizeTriggersTest() {
+      RunTest(TestCloseChunk).Wait();
+      async Task TestCloseChunk(string fname) {
+        var opt = new WriterOptions() {
+          CloseChunk = new Triggers() { Size = 0 },
+          FlushToOS = new Triggers() { Size = 0 },
+        };
+        using (var writer = new Writer(fname, opt)) {
+          while (true) {
+            try {
+              long n = writer.RecordsWritten + 1;
+              await writer.Write(new Event<long>(new DateTime(n, DateTimeKind.Utc), n));
+              break;
+            } catch (InjectedWriteException) {
             }
-            Assert.IsTrue(writer.RecordsWritten > 0);
-            while (true) {
-              ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
-              if (stats.Total >= writer.RecordsWritten) {
-                Assert.AreEqual(1, stats.First);
-                Assert.AreEqual(writer.RecordsWritten, stats.Last);
-                Assert.AreEqual(writer.RecordsWritten, stats.Total);
-                break;
-              }
-              await Task.Delay(TimeSpan.FromMilliseconds(1));
+          }
+          Assert.IsTrue(writer.RecordsWritten > 0);
+          while (true) {
+            ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
+            if (stats.Total >= writer.RecordsWritten) {
+              Assert.AreEqual(1, stats.First);
+              Assert.AreEqual(writer.RecordsWritten, stats.Last);
+              Assert.AreEqual(writer.RecordsWritten, stats.Total);
+              break;
             }
+            await Task.Delay(TimeSpan.FromMilliseconds(1));
           }
         }
       }
+    }
 
-      async Task TestTimeTriggers() {
-        await WithFile((string fname) => Test(fname, new WriterOptions() {
-          CloseChunk = new Triggers() {
-            Age = TimeSpan.Zero,
-            AgeRetry = TimeSpan.Zero,
-          },
-          FlushToOS = new Triggers() {
-            Size = 0,
-          },
-        }));
-        await WithFile((string fname) => Test(fname, new WriterOptions() {
-          CloseChunk = new Triggers() {
-            Age = TimeSpan.Zero,
-            AgeRetry = TimeSpan.Zero,
-          },
-          FlushToOS = new Triggers() {
-            Age = TimeSpan.Zero,
-            AgeRetry = TimeSpan.Zero,
-          },
-        }));
-        await WithFile((string fname) => Test(fname, new WriterOptions() {
-          CloseChunk = new Triggers() {
-            Age = TimeSpan.Zero,
-            AgeRetry = TimeSpan.Zero,
-          },
-          FlushToDisk = new Triggers() {
-            Age = TimeSpan.Zero,
-            AgeRetry = TimeSpan.Zero,
-          },
-        }));
+    [TestMethod]
+    public void TimeTriggersTest() {
+      RunTest((string fname) => Test(fname, new WriterOptions() {
+        CloseChunk = new Triggers() {
+          Age = TimeSpan.Zero,
+          AgeRetry = TimeSpan.Zero,
+        },
+        FlushToOS = new Triggers() {
+          Size = 0,
+        },
+      })).Wait();
+      RunTest((string fname) => Test(fname, new WriterOptions() {
+        CloseChunk = new Triggers() {
+          Age = TimeSpan.Zero,
+          AgeRetry = TimeSpan.Zero,
+        },
+        FlushToOS = new Triggers() {
+          Age = TimeSpan.Zero,
+          AgeRetry = TimeSpan.Zero,
+        },
+      })).Wait();
+      RunTest((string fname) => Test(fname, new WriterOptions() {
+        CloseChunk = new Triggers() {
+          Age = TimeSpan.Zero,
+          AgeRetry = TimeSpan.Zero,
+        },
+        FlushToDisk = new Triggers() {
+          Age = TimeSpan.Zero,
+          AgeRetry = TimeSpan.Zero,
+        },
+      })).Wait();
 
-        async Task Test(string fname, WriterOptions opt) {
-          using (var writer = new Writer(fname, opt)) {
-            await writer.Write(new Event<long>(new DateTime(1, DateTimeKind.Utc), 1));
-            while (true) {
-              ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
-              if (stats.Total > 0) {
-                Assert.AreEqual(1, stats.Total);
-                Assert.AreEqual(1, stats.First);
-                Assert.AreEqual(1, stats.Last);
-                break;
-              }
-              await Task.Delay(TimeSpan.FromMilliseconds(1));
+      async Task Test(string fname, WriterOptions opt) {
+        using (var writer = new Writer(fname, opt)) {
+          await writer.Write(new Event<long>(new DateTime(1, DateTimeKind.Utc), 1));
+          while (true) {
+            ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
+            if (stats.Total > 0) {
+              Assert.AreEqual(1, stats.Total);
+              Assert.AreEqual(1, stats.First);
+              Assert.AreEqual(1, stats.Last);
+              break;
             }
+            await Task.Delay(TimeSpan.FromMilliseconds(1));
           }
         }
       }
+    }
 
-      async Task TestManyRecords(long n, long bufRecs) {
-        Debug.Assert(n >= 0);
-        Debug.Assert(bufRecs >= 1);
+    [TestMethod]
+    public void PristineTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        await Write(fname, 1, n, bufRecs);
+        await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+      }).Wait();
+    }
 
-        await WithFile(TestPristine);
-        await WithFile(TestCorruption);
-        await WithFile(TestTruncation);
-        await WithFile(TestNoMeters);
-        await WithFile(TestAppend);
-        await WithFile(TestConcurrent);
+    [TestMethod]
+    public void CorruptionTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        await Write(fname, 1, n, bufRecs);
+        await CorruptVerifyFile(fname, n, bufRecs);
+      }).Wait();
+    }
 
-        async Task TestPristine(string fname) {
-          await Write(fname, 1, n, bufRecs);
+    [TestMethod]
+    public void TruncationTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        await Write(fname, 1, n, bufRecs);
+        await TruncateVerifyFile(fname, n, bufRecs);
+      }).Wait();
+    }
+
+    [TestMethod]
+    public void AppendTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        foreach (int junk in new[] { 0, 1, 128 << 10 }) {
+          long half = (n / 2) / bufRecs * bufRecs;
+          File.AppendAllText(fname, new string(' ', junk));
+          await Write(fname, 1, half, bufRecs);
+          File.AppendAllText(fname, new string(' ', junk));
+          await Write(fname, 1 + half, n - half, bufRecs);
+          File.AppendAllText(fname, new string(' ', junk));
           await VerifyFile(fname, n, bufRecs, FileState.Pristine);
+          File.Delete(fname);
         }
+      }).Wait();
+    }
 
-        async Task TestCorruption(string fname) {
-          await Write(fname, 1, n, bufRecs);
-          await CorruptVerifyFile(fname, n, bufRecs);
-        }
-
-        async Task TestTruncation(string fname) {
-          await Write(fname, 1, n, bufRecs);
-          await TruncateVerifyFile(fname, n, bufRecs);
-        }
-
-        async Task TestAppend(string fname) {
-          foreach (int junk in new[] { 0, 1, 128 << 10 }) {
-            long half = (n / 2) / bufRecs * bufRecs;
-            File.AppendAllText(fname, new string(' ', junk));
-            await Write(fname, 1, half, bufRecs);
-            File.AppendAllText(fname, new string(' ', junk));
-            await Write(fname, 1 + half, n - half, bufRecs);
-            File.AppendAllText(fname, new string(' ', junk));
-            await VerifyFile(fname, n, bufRecs, FileState.Pristine);
-            File.Delete(fname);
+    [TestMethod]
+    public void NoMetersTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        await Write(fname, 1, n, bufRecs);
+        using (var file = new FileStream(fname, FileMode.Open, FileAccess.ReadWrite,
+                                         FileShare.Read, 1, useAsync: true)) {
+          for (long pos = 0; pos < file.Length; pos += Format.MeterInterval) {
+            var buf = new byte[1];
+            file.Seek(pos, SeekOrigin.Begin);
+            Assert.AreEqual(1, await file.ReadAsync(buf, 0, 1));
+            ++buf[0];
+            file.Seek(pos, SeekOrigin.Begin);
+            await file.WriteAsync(buf, 0, 1);
           }
         }
+        await VerifyFile(
+          fname, n, bufRecs, ByteWriter.ErrorInjector == null ? FileState.Pristine : FileState.Truncated);
+        await CorruptVerifyFile(fname, n, bufRecs);
+      }).Wait();
+    }
 
-        async Task TestNoMeters(string fname) {
-          await Write(fname, 1, n, bufRecs);
-          using (var file = new FileStream(fname, FileMode.Open, FileAccess.ReadWrite,
-                                           FileShare.Read, 1, useAsync: true)) {
-            for (long pos = 0; pos < file.Length; pos += Format.MeterInterval) {
-              var buf = new byte[1];
-              file.Seek(pos, SeekOrigin.Begin);
-              Assert.AreEqual(1, await file.ReadAsync(buf, 0, 1));
-              ++buf[0];
-              file.Seek(pos, SeekOrigin.Begin);
-              await file.WriteAsync(buf, 0, 1);
-            }
-          }
-          await VerifyFile(
-            fname, n, bufRecs, ByteWriter.ErrorInjector == null ? FileState.Pristine : FileState.Truncated);
-          await CorruptVerifyFile(fname, n, bufRecs);
+    [TestMethod]
+    public void ConcurrentTest() {
+      RunTest(async (string fname, long n, long bufRecs) => {
+        Task w = Write(fname, 1, n, bufRecs);
+        while (!w.IsCompleted) {
+          await VerifyFile(fname, n, bufRecs, FileState.Expanding);
         }
-
-        async Task TestConcurrent(string fname) {
-          Task w = Write(fname, 1, n, bufRecs);
-          while (!w.IsCompleted) {
-            await VerifyFile(fname, n, bufRecs, FileState.Expanding);
-          }
-        }
-      }
+      }).Wait();
     }
   }
 }
