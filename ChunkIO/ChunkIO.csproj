@@ -45,6 +45,7 @@
   <ItemGroup>
     <Compile Include="AsyncDisposable.cs" />
     <Compile Include="AsyncEnumerable.cs" />
+    <Compile Include="AsyncMutex.cs" />
     <Compile Include="BufferedReader.cs" />
     <Compile Include="Encoding.cs" />
     <Compile Include="FileId.cs" />
