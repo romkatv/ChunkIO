@@ -59,9 +59,9 @@ namespace ChunkIO {
           await s_connect.LockAsync();
           try {
             // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
-            // we have verified its existence and our attempt to connect to it. We use a semaphore to
+            // we have verified its existence and our attempt to connect to it. We use a mutex to
             // restrict the number of simultaneous ConnectAsync() because ConnectAsync() blocks a task
-            // thread for the whole duration of its execution. Without the semaphore, WaitAsync() calls
+            // thread for the whole duration of its execution. Without the mutex, WaitAsync() calls
             // could block all task threads.
             await pipe.ConnectAsync(100);
           } catch (TimeoutException) {
