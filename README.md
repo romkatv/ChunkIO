@@ -21,7 +21,7 @@ The source code is all there is. There is no official NuGet package.
 
 No dependencies other than .NET Framework.
 
-## Supported Platofrms
+## Supported Platforms
 
 Lightly tested (and heavily used in production) on Windows with .NET Framework 4.7.2.
 
