@@ -48,13 +48,14 @@ namespace ChunkIO {
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
-      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      long len = Length;
+      if (to <= 0 || from >= len || from >= to) return null;
       if (from > _last?.BeginPosition && from <= _last?.EndPosition && await _last.IsSkippable()) {
         IChunk res = await Scan(_last.EndPosition);
         if (res != null) return res;
       }
       bool meters = false;
-      for (long m = MeterBefore(Math.Max(0, from)); m < Math.Min(_reader.Length, to); m += MeterInterval) {
+      for (long m = MeterBefore(Math.Max(0, from)); m < Math.Min(len, to); m += MeterInterval) {
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
         meters = true;
@@ -85,9 +86,10 @@ namespace ChunkIO {
     // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadLastAsync(long from, long to) {
-      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      long len = Length;
+      if (to <= 0 || from >= len || from >= to) return null;
       bool meters = false;
-      for (long m = MeterBefore(Math.Min(to - 1, _reader.Length)); m >= 0 && from < to; m -= MeterInterval) {
+      for (long m = MeterBefore(Math.Min(to - 1, len)); m >= 0 && from < to; m -= MeterInterval) {
         Debug.Assert(m < to);
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
@@ -126,7 +128,7 @@ namespace ChunkIO {
     //
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadMiddleAsync(long from, long to) {
-      if (to <= 0 || from >= _reader.Length || from >= to) return null;
+      if (to <= 0 || from >= to) return null;
       if (to / MeterInterval > from / MeterInterval) {
         long mid = from + (to - from) / 2;
         mid = Math.Min(MeterBefore(to), MeterAfter(mid));
@@ -194,7 +196,7 @@ namespace ChunkIO {
       Debug.Assert(array != null);
       Debug.Assert(offset >= 0);
       Debug.Assert(array.Length - offset >= count);
-      if (!(MeteredPosition(pos, count) <= _reader.Length)) return false;
+      if (!(MeteredPosition(pos, count) <= Length)) return false;
       while (count > 0) {
         Debug.Assert(IsValidPosition(pos));
         if (pos % MeterInterval == 0) pos += Meter.Size;
