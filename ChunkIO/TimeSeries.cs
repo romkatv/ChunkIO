@@ -175,9 +175,9 @@ namespace ChunkIO {
     protected virtual void Dispose(bool disposing) {
       if (disposing) {
         try {
-          Encoder.Dispose();
-        } finally {
           _writer.Dispose();
+        } finally {
+          Encoder.Dispose();
         }
       }
     }
