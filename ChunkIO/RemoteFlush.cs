@@ -18,7 +18,9 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,50 +42,71 @@ namespace ChunkIO {
     //   * Pipe permission error.
     public static async Task<long?> FlushAsync(string fname, bool flushToDisk) {
       if (fname == null) throw new ArgumentNullException(nameof(fname));
-      while (true) {
-        using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
-                                                    PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
-          // NamedPipeClientStream has an awful API. It doesn't allow us to bail early if there is no pipe and
-          // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
-          // a mutex existence check and a loop. We create this mutex together with the pipe to serve as
-          // a marker of the pipe's existence. It's difficult to use the pipe itself as such marker because
-          // server pipes disappear after accepting and serving a request and there may be a short gap before
-          // we create new server connections.
-          if (Mutex.TryOpenExisting(MutexNameFromFile(fname), out Mutex mutex)) {
-            mutex.Dispose();
-          } else {
-            return null;
+      Log.Info("FlushAsync({0}, {1}): start", fname, flushToDisk);
+      try {
+        while (true) {
+          using (var pipe = new NamedPipeClientStream(".", PipeNameFromFile(fname), PipeDirection.InOut,
+                                                      PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
+            // NamedPipeClientStream has an awful API. It doesn't allow us to bail early if there is no pipe and
+            // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
+            // a mutex existence check and a loop. We create this mutex together with the pipe to serve as
+            // a marker of the pipe's existence. It's difficult to use the pipe itself as such marker because
+            // server pipes disappear after accepting and serving a request and there may be a short gap before
+            // we create new server connections.
+            if (Mutex.TryOpenExisting(MutexNameFromFile(fname), MutexRights.Synchronize, out Mutex mutex)) {
+              Log.Info("FlushAsync({0}, {1}): mutex exists: {2}", fname, flushToDisk, MutexNameFromFile(fname));
+              mutex.Dispose();
+            } else {
+              Log.Info("FlushAsync({0}, {1}): mutex doesn't exist: {2}", fname, flushToDisk, MutexNameFromFile(fname));
+              return null;
+            }
+            await s_connect.WaitAsync();
+            try {
+              // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
+              // we have verified its existence and our attempt to connect to it. We use a semaphore to
+              // restrict the number of simultaneous ConnectAsync() because ConnectAsync() blocks a task
+              // thread for the whole duration of its execution. Without the semaphore, WaitAsync() calls
+              // could block all task threads.
+              Log.Info("FlushAsync({0}, {1}): connecting", fname, flushToDisk);
+              await pipe.ConnectAsync(100);
+              Log.Info("FlushAsync({0}, {1}): connected", fname, flushToDisk);
+            } catch (TimeoutException) {
+              Log.Info("FlushAsync({0}, {1}): ConnectAsync => TimeoutException", fname, flushToDisk);
+              continue;
+            } catch (IOException) {
+              Log.Info("FlushAsync({0}, {1}): ConnectAsync => IOException", fname, flushToDisk);
+              continue;
+            } finally {
+              s_connect.Release();
+            }
+            var buf = new byte[UInt64LE.Size];
+            if (flushToDisk) buf[0] = 1;
+            try {
+              await pipe.WriteAsync(buf, 0, 1);
+              await pipe.FlushAsync();
+              if (await pipe.ReadAsync(buf, 0, UInt64LE.Size) != UInt64LE.Size) {
+                Log.Info("FlushAsync({0}, {1}): incomplete response", fname, flushToDisk);
+                continue;
+              }
+            } catch (Exception e) {
+              Log.Info("FlushAsync({0}, {1}): IO => {2} ({3})", fname, flushToDisk, e.GetType().Name, e.Message);
+              continue;
+            }
+            int offset = 0;
+            ulong res = UInt64LE.Read(buf, ref offset);
+            if (res < long.MaxValue) {
+              Log.Info("FlushAsync({0}, {1}): success", fname, flushToDisk);
+              return (long)res;
+            }
+            if (res == ulong.MaxValue) {
+              throw new IOException($"Remote writer failed to Flush: {fname}");
+            }
+            throw new Exception($"Invalid Flush response: {res}");
           }
-          await s_connect.WaitAsync();
-          try {
-            // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
-            // we have verified its existence and our attempt to connect to it. We use a semaphore to
-            // restrict the number of simultaneous ConnectAsync() because ConnectAsync() blocks a task
-            // thread for the whole duration of its execution. Without the semaphore, WaitAsync() calls
-            // could block all task threads.
-            await pipe.ConnectAsync(100);
-          } catch (TimeoutException) {
-            continue;
-          } catch (IOException) {
-            continue;
-          } finally {
-            s_connect.Release();
-          }
-          var buf = new byte[UInt64LE.Size];
-          if (flushToDisk) buf[0] = 1;
-          try {
-            await pipe.WriteAsync(buf, 0, 1);
-            await pipe.FlushAsync();
-            if (await pipe.ReadAsync(buf, 0, UInt64LE.Size) != UInt64LE.Size) continue;
-          } catch {
-            continue;
-          }
-          int offset = 0;
-          ulong res = UInt64LE.Read(buf, ref offset);
-          if (res < long.MaxValue) return (long)res;
-          if (res == ulong.MaxValue) throw new IOException($"Remote writer failed to Flush: {fname}");
-          throw new Exception($"Invalid Flush response: {res}");
         }
+      } catch (Exception e) {
+        Log.Info("FlushAsync({0}, {1}): failed with {2} ({3})", fname, flushToDisk, e.GetType().Name, e.Message);
+        throw;
       }
     }
 
@@ -95,21 +118,29 @@ namespace ChunkIO {
 
     static string PipeNameFromFile(string fname) {
       using (var md5 = MD5.Create()) {
-        return "romkatv-chunkio-" + HexLowerCase(md5.ComputeHash(Encoding.UTF8.GetBytes(fname.ToLowerInvariant())));
+        string id = Path.GetFullPath(fname).ToLowerInvariant();
+        return "romkatv-chunkio-" + HexLowerCase(md5.ComputeHash(Encoding.UTF8.GetBytes(id)));
       }
     }
 
-    static string MutexNameFromFile(string fname) => PipeNameFromFile(fname);
+    static string MutexNameFromFile(string fname) => @"Global\" + PipeNameFromFile(fname);
 
     sealed class Listener : IDisposable {
       readonly PipeServer _srv;
       readonly Mutex _mutex;
 
       public Listener(string fname, Func<bool, Task<long>> flush) {
+        Log.Info("Listener({0}): creating mutex {1}", fname, MutexNameFromFile(fname));
         // This mutex serves as a marker of the existence of flush listener. RemoteFLush.FlushAsync() looks at it.
-        _mutex = new Mutex(false, MutexNameFromFile(fname), out bool createdNew);
+        // We allow all authenticated users to access the mutex.
+        var security = new MutexSecurity();
+        security.AddAccessRule(
+            new MutexAccessRule(
+                new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+                MutexRights.Synchronize,
+                AccessControlType.Allow));
+        _mutex = new Mutex(true, MutexNameFromFile(fname), out bool createdNew, security);
         try {
-          if (!createdNew) throw new Exception($"Mutex already exists: {fname}");
           _srv = new PipeServer(PipeNameFromFile(fname), 2, async (Stream strm, CancellationToken cancel) => {
             var buf = new byte[UInt64LE.Size];
             if (await strm.ReadAsync(buf, 0, 1, cancel) != 1) throw new Exception("Empty Flush request");
@@ -134,8 +165,11 @@ namespace ChunkIO {
       }
 
       public void Dispose() {
-        _srv.Dispose();
-        _mutex.Dispose();
+        try {
+          _srv.Dispose();
+        } finally {
+          _mutex.Dispose();
+        }
       }
     }
   }

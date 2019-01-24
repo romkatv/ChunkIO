@@ -18,6 +18,8 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,6 +62,13 @@ namespace ChunkIO {
         NamedPipeServerStream srv = null;
         bool connected = false;
         try {
+          // Allow all authenticated users to access the pipe.
+          var security = new PipeSecurity();
+          security.AddAccessRule(
+              new PipeAccessRule(
+                  new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+                  PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                  AccessControlType.Allow));
           srv = new NamedPipeServerStream(
               pipeName: name,
               direction: PipeDirection.InOut,
@@ -67,7 +76,8 @@ namespace ChunkIO {
               transmissionMode: PipeTransmissionMode.Byte,
               options: PipeOptions.Asynchronous | PipeOptions.WriteThrough,
               inBufferSize: 0,
-              outBufferSize: 0);
+              outBufferSize: 0,
+              pipeSecurity: security);
           await srv.WaitForConnectionAsync(_cancel.Token);
           connected = true;
           Update(() => {
