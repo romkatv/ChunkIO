@@ -145,8 +145,9 @@ namespace ChunkIO {
     }
   }
 
+  // It's allowed to call all public methods of BufferedWriter concurrently, even Dispose().
   sealed class BufferedWriter : IDisposable {
-    readonly SemaphoreSlim _sem = new SemaphoreSlim(1, 1);
+    readonly AsyncMutex _mutex = new AsyncMutex();
     readonly WriterOptions _opt;
     readonly ChunkWriter _writer;
     readonly IDisposable _listener;
@@ -156,7 +157,7 @@ namespace ChunkIO {
     Chunk _buf = null;
     long? _bufOS = null;
     long? _bufDisk = null;
-    volatile bool _disposed = false;
+    bool _disposed = false;
 
     public BufferedWriter(string fname) : this(fname, new WriterOptions()) { }
 
@@ -165,9 +166,9 @@ namespace ChunkIO {
       opt.Validate();
       _opt = opt.Clone();
       _writer = new ChunkWriter(fname);
-      _closeChunk = new Timer(_sem, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
-      _flushToOS = new Timer(_sem, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
-      _flushToDisk = new Timer(_sem, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
+      _closeChunk = new Timer(_mutex, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
+      _flushToOS = new Timer(_mutex, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
+      _flushToDisk = new Timer(_mutex, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
       if (_opt.AllowRemoteFlush) _listener = RemoteFlush.CreateListener(_writer.Id, FlushAsync);
     }
 
@@ -180,68 +181,62 @@ namespace ChunkIO {
     // If an error was encountered when an attempt was made to flush the last chunk,
     // LockChunk() will try to flush it and will throw if unable to do so.
     public async Task<IOutputChunk> LockChunk() {
-      if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      await _sem.WaitAsync();
-      if (_buf != null) {
-        if (!_buf.CompressedContent.HasValue) {
-          Debug.Assert(!_buf.IsAbandoned);
-          return new LockedChunk(_buf, isNew: false);
-        }
-        try {
+      await _mutex.LockAsync();
+      try {
+        CheckDispose();
+        if (_buf != null) {
+          if (!_buf.CompressedContent.HasValue) {
+            Debug.Assert(!_buf.IsAbandoned);
+            return new LockedChunk(_buf, isNew: false);
+          }
           await DoCloseChunk(flushToDisk: false);
-        } catch {
-          _sem.Release();
-          throw;
         }
+        Debug.Assert(_buf == null);
+        _buf = new Chunk(this);
+        await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
+        return new LockedChunk(_buf, isNew: true);
+      } catch {
+        _mutex.Unlock();
+        throw;
       }
-      _buf = new Chunk(this);
-      await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
-      return new LockedChunk(_buf, isNew: true);
     }
 
     // If there is current chunk, waits until it gets unlocked and writes its content to
     // the underlying ChunkWriter. Otherwise does nothing.
-    public async Task CloseChunkAsync() {
-      if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      await _sem.WithLock(() => DoCloseChunk(flushToDisk: null));
-    }
+    public Task CloseChunkAsync() => _mutex.WithLock(() => {
+      CheckDispose();
+      return DoCloseChunk(flushToDisk: null);
+    });
 
     // 1. If there is current chunk, waits until it gets unlocked and closes it.
     // 2. Flushes the underlying ChunkWriter.
-    public async Task<long> FlushAsync(bool flushToDisk) {
-      if (_disposed) throw new ObjectDisposedException("BufferedWriter");
-      return await _sem.WithLock(async () => {
-        await DoCloseChunk(flushToDisk);
-        return _writer.Length;
-      });
-    }
+    public Task<long> FlushAsync(bool flushToDisk) => _mutex.WithLock(async () => {
+      CheckDispose();
+      await DoCloseChunk(flushToDisk);
+      return _writer.Length;
+    });
 
     public void Dispose() {
-      if (_disposed) return;
       try {
         _listener?.Dispose();
       } finally {
-        try {
-          _sem.WithLock(async () => {
-            try {
-              await DoCloseChunk(flushToDisk: false);
-            } finally {
-              await _closeChunk.Stop();
-              await _flushToOS.Stop();
-              await _flushToDisk.Stop();
-              _writer.Dispose();
-            }
-          }).Wait();
-        } finally {
-          _sem.Dispose();
+        _mutex.WithLock(async () => {
+          if (_disposed) return;
           _disposed = true;
-        }
+          try {
+            await DoCloseChunk(flushToDisk: false);
+          } finally {
+            await _closeChunk.Stop();
+            await _flushToOS.Stop();
+            await _flushToDisk.Stop();
+            _writer.Dispose();
+          }
+        }).Wait();
       }
     }
 
     async Task DoCloseChunk(bool? flushToDisk) {
-      Debug.Assert(!_disposed);
-      Debug.Assert(_sem.CurrentCount == 0);
+      Debug.Assert(_mutex.IsLocked);
       if (_buf != null) {
         if (_buf.Close(_opt.CompressionLevel)) {
           ArraySegment<byte> compressed = _buf.CompressedContent.Value;
@@ -264,8 +259,7 @@ namespace ChunkIO {
     }
 
     async Task DoFlush(bool flushToDisk) {
-      Debug.Assert(!_disposed);
-      Debug.Assert(_sem.CurrentCount == 0);
+      Debug.Assert(_mutex.IsLocked);
       Debug.Assert((_bufDisk ?? -1) >= (_bufOS ?? -1));
       if (_bufDisk == null || !flushToDisk && _bufOS == null) return;
       await _writer.FlushAsync(flushToDisk);
@@ -278,15 +272,19 @@ namespace ChunkIO {
     }
 
     async Task Unlock() {
-      Debug.Assert(!_disposed);
-      Debug.Assert(_sem.CurrentCount == 0);
+      Debug.Assert(_mutex.IsLocked);
       try {
         if (_buf.Stream.Length >= _buf.CloseAtSize || _buf.IsAbandoned) {
           await DoCloseChunk(flushToDisk: null);
         }
       } finally {
-        _sem.Release();
+        _mutex.Unlock();
       }
+    }
+
+    void CheckDispose() {
+      Debug.Assert(_mutex.IsLocked);
+      if (_disposed) throw new ObjectDisposedException(nameof(BufferedWriter));
     }
 
     sealed class LockedChunk : IOutputChunk {
@@ -365,47 +363,27 @@ namespace ChunkIO {
     }
   }
 
-  static class SemaphoreSlimExtensions {
-    public static async Task WithLock(this SemaphoreSlim sem, Func<Task> action) {
-      await sem.WaitAsync();
-      try {
-        await action.Invoke();
-      } finally {
-        sem.Release();
-      }
-    }
-
-    public static async Task<T> WithLock<T>(this SemaphoreSlim sem, Func<Task<T>> action) {
-      await sem.WaitAsync();
-      try {
-        return await action.Invoke();
-      } finally {
-        sem.Release();
-      }
-    }
-  }
-
   // Thread-compatible but not thread-safe.
   sealed class Timer {
-    readonly SemaphoreSlim _sem;
+    readonly AsyncMutex _mutex;
     readonly Func<Task> _action;
     readonly TimeSpan? _retry;
     CancellationTokenSource _cancel = null;
     DateTime? _time = null;
     Task _task = null;
 
-    public Timer(SemaphoreSlim sem, Func<Task> action, TimeSpan? retry) {
-      Debug.Assert(sem != null);
+    public Timer(AsyncMutex mutex, Func<Task> action, TimeSpan? retry) {
+      Debug.Assert(mutex != null);
       Debug.Assert(action != null);
       Debug.Assert(retry == null || retry >= TimeSpan.Zero);
-      _sem = sem;
+      _mutex = mutex;
       _action = action;
       _retry = retry;
     }
 
     // Requires: The semaphore is locked.
     public async Task Stop() {
-      Debug.Assert(_sem.CurrentCount == 0);
+      Debug.Assert(_mutex.IsLocked);
       Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (_time == null));
       if (_task != null) {
         // _cancel.Cancel() can cause Run() to continue *synchronously*. Thus, _task can be
@@ -421,7 +399,7 @@ namespace ChunkIO {
     //
     // The returned task completes when the action is scheduled, which happens almost immediately.
     public async Task ScheduleAt(DateTime? t) {
-      Debug.Assert(_sem.CurrentCount == 0);
+      Debug.Assert(_mutex.IsLocked);
       await Stop();
       if (t.HasValue) {
         Debug.Assert(_retry.HasValue);
@@ -433,9 +411,10 @@ namespace ChunkIO {
 
     async Task Run() {
       DateTime? retry = _time + _retry;
+      await Task.Yield();
       try {
         await Delay(_time.Value, _cancel.Token);
-        await _sem.WaitAsync(_cancel.Token);
+        await _mutex.LockAsync(_cancel.Token);
       } finally {
         _cancel.Dispose();
         _task = null;
@@ -451,12 +430,11 @@ namespace ChunkIO {
           await ScheduleAt(retry);
         }
       } finally {
-        _sem.Release();
+        _mutex.Unlock();
       }
     }
 
     static async Task Delay(DateTime t, CancellationToken cancel) {
-      await Task.Yield();
       while (true) {
         DateTime now = DateTime.UtcNow;
         if (t <= now) return;

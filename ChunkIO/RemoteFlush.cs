@@ -27,7 +27,7 @@ using System.Threading.Tasks;
 
 namespace ChunkIO {
   static class RemoteFlush {
-    static SemaphoreSlim s_connect = new SemaphoreSlim(1, 1);
+    static AsyncMutex s_connect = new AsyncMutex();
 
     // Returns:
     //
@@ -56,7 +56,7 @@ namespace ChunkIO {
           } else {
             return null;
           }
-          await s_connect.WaitAsync();
+          await s_connect.LockAsync();
           try {
             // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
             // we have verified its existence and our attempt to connect to it. We use a semaphore to
@@ -69,7 +69,7 @@ namespace ChunkIO {
           } catch (IOException) {
             continue;
           } finally {
-            s_connect.Release();
+            s_connect.Unlock();
           }
           var buf = new byte[UInt64LE.Size];
           if (flushToDisk) buf[0] = 1;
