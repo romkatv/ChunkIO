@@ -193,7 +193,7 @@ namespace ChunkIO {
         }
         Debug.Assert(_buf == null);
         _buf = new Chunk(this);
-        await _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
+        _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
         return new LockedChunk(_buf, isNew: true);
       } catch {
         _mutex.Unlock();
@@ -226,9 +226,9 @@ namespace ChunkIO {
           try {
             await DoCloseChunk(flushToDisk: false);
           } finally {
-            await _closeChunk.Stop();
-            await _flushToOS.Stop();
-            await _flushToDisk.Stop();
+            _closeChunk.Stop();
+            _flushToOS.Stop();
+            _flushToDisk.Stop();
             _writer.Dispose();
           }
         }).Wait();
@@ -241,12 +241,12 @@ namespace ChunkIO {
         if (_buf.Close(_opt.CompressionLevel)) {
           ArraySegment<byte> compressed = _buf.CompressedContent.Value;
           await _writer.WriteAsync(_buf.UserData, compressed.Array, compressed.Offset, compressed.Count);
-          if (_bufDisk == null) await _flushToDisk.ScheduleAt(DateTime.UtcNow + _opt.FlushToDisk.Age);
-          if (_bufOS == null) await _flushToOS.ScheduleAt(DateTime.UtcNow + _opt.FlushToOS.Age);
+          if (_bufDisk == null) _flushToDisk.ScheduleAt(DateTime.UtcNow + _opt.FlushToDisk.Age);
+          if (_bufOS == null) _flushToOS.ScheduleAt(DateTime.UtcNow + _opt.FlushToOS.Age);
           _bufOS = (_bufOS ?? 0) + _buf.Stream.Length;
           _bufDisk = (_bufDisk ?? 0) + _buf.Stream.Length;
         }
-        await _closeChunk.Stop();
+        _closeChunk.Stop();
         _buf.Dispose();
         _buf = null;
       }
@@ -264,10 +264,10 @@ namespace ChunkIO {
       if (_bufDisk == null || !flushToDisk && _bufOS == null) return;
       await _writer.FlushAsync(flushToDisk);
       _bufOS = null;
-      await _flushToOS.Stop();
+      _flushToOS.Stop();
       if (flushToDisk) {
         _bufDisk = null;
-        await _flushToDisk.Stop();
+        _flushToDisk.Stop();
       }
     }
 
@@ -363,7 +363,6 @@ namespace ChunkIO {
     }
   }
 
-  // Thread-compatible but not thread-safe.
   sealed class Timer {
     readonly AsyncMutex _mutex;
     readonly Func<Task> _action;
@@ -381,53 +380,51 @@ namespace ChunkIO {
       _retry = retry;
     }
 
-    // Requires: The semaphore is locked.
-    public async Task Stop() {
+    // Requires: The mutex is locked.
+    public void Stop() {
       Debug.Assert(_mutex.IsLocked);
       Debug.Assert((_task == null) == (_cancel == null) && (_task == null) == (_time == null));
       if (_task != null) {
-        // _cancel.Cancel() can cause Run() to continue *synchronously*. Thus, _task can be
-        // null when _cancel.Cancel() returns.
-        Task t = _task;
         _cancel.Cancel();
-        try { await t; } catch { }
-        Debug.Assert(_task == null && _cancel == null && _time == null);
-      }
-    }
-
-    // Requires: The semaphore is locked.
-    //
-    // The returned task completes when the action is scheduled, which happens almost immediately.
-    public async Task ScheduleAt(DateTime? t) {
-      Debug.Assert(_mutex.IsLocked);
-      await Stop();
-      if (t.HasValue) {
-        Debug.Assert(_retry.HasValue);
-        _time = t;
-        _cancel = new CancellationTokenSource();
-        _task = Run();
-      }
-    }
-
-    async Task Run() {
-      DateTime? retry = _time + _retry;
-      await Task.Yield();
-      try {
-        await Delay(_time.Value, _cancel.Token);
-        await _mutex.LockAsync(_cancel.Token);
-      } finally {
-        _cancel.Dispose();
+        _cancel = null;
         _task = null;
         _cancel = null;
         _time = null;
       }
+    }
+
+    // Requires: The mutex is locked.
+    //
+    // The returned task completes when the action is scheduled, which happens almost immediately.
+    public void ScheduleAt(DateTime? t) {
+      Debug.Assert(_mutex.IsLocked);
+      Stop();
+      if (t.HasValue) {
+        Debug.Assert(_retry.HasValue);
+        _time = t;
+        _cancel = new CancellationTokenSource();
+        _task = Run(t.Value, _cancel);
+      }
+    }
+
+    async Task Run(DateTime t, CancellationTokenSource cancel) {
+      try {
+        await Delay(t, cancel.Token);
+        await _mutex.LockAsync(cancel.Token);
+      } finally {
+        cancel.Dispose();
+      }
+      _task = null;
+      _cancel = null;
+      _time = null;
       try {
         await _action.Invoke();
       } catch {
         if (_task == null) {
+          DateTime? retry = t + _retry.Value;
           DateTime now = DateTime.UtcNow;
           if (now > retry) retry = now;
-          await ScheduleAt(retry);
+          ScheduleAt(retry);
         }
       } finally {
         _mutex.Unlock();
