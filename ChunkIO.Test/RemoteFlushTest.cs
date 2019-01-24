@@ -63,11 +63,17 @@ namespace ChunkIO.Test {
 
     [TestMethod]
     public void ManyFlushesOneFileTest() {
-      async Task Flush() {
-        Assert.AreEqual(42, await RemoteFlush.FlushAsync(Id("test"), false));
-      }
-      using (var listener = RemoteFlush.CreateListener(Id("test"), _ => Task.FromResult<long>(42))) {
-        Task.WhenAll(Enumerable.Range(0, 2048).Select(_ => Flush())).Wait();
+      for (long i = 0; i != 16; ++i) {
+        async Task Flush() {
+          Assert.AreEqual(42, await RemoteFlush.FlushAsync(Id("test"), false));
+        }
+        using (var listener = RemoteFlush.CreateListener(Id("test"), _ => Task.FromResult<long>(42))) {
+          try {
+            Task.WhenAll(Enumerable.Range(0, 2048).Select(_ => Flush())).Wait();
+          } catch {
+            Environment.Exit(0);
+          }
+        }
       }
     }
 

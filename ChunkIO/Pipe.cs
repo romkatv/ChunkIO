@@ -61,44 +61,54 @@ namespace ChunkIO {
       async Task RunServer() {
         NamedPipeServerStream srv = null;
         bool connected = false;
-        try {
-          // Allow all authenticated users to access the pipe.
-          var security = new PipeSecurity();
-          security.AddAccessRule(
-              new PipeAccessRule(
-                  new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-                  PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
-                  AccessControlType.Allow));
-          srv = new NamedPipeServerStream(
-              pipeName: name,
-              direction: PipeDirection.InOut,
-              maxNumberOfServerInstances: NamedPipeServerStream.MaxAllowedServerInstances,
-              transmissionMode: PipeTransmissionMode.Byte,
-              options: PipeOptions.Asynchronous | PipeOptions.WriteThrough,
-              inBufferSize: 0,
-              outBufferSize: 0,
-              pipeSecurity: security);
-          await srv.WaitForConnectionAsync(_cancel.Token);
-          connected = true;
-          Update(() => {
-            --free;
-            ++active;
-          });
-          await handler.Invoke(srv, _cancel.Token);
-        } finally {
-          if (connected) {
-            try { srv.Disconnect(); } catch { }
-          }
-          if (srv != null) {
-            try { srv.Dispose(); } catch { }
-          }
-          Update(() => {
-            if (connected) {
-              --active;
-            } else {
+        // NamedPipeServerStream has a nasty bug. It sometimes forgets to unregister from a CancellationToken
+        // after an async operation completes. If we call WaitForConnectionAsync(_cancel.Token) and it fails
+        // to unregister, our call to _cancel.Cancel() in Stop() will trigger the forgotten cancellation handler,
+        // which will attempt to cancel IO that has already competed via a handle that has already been closed.
+        // This will result in an exception flying out of _cancel.Cancel(). We could pass `false` to that Cancel()
+        // call and catch all exceptions, but it will expose us to a memory leak due to the accumulation of
+        // forgotten cancellation handlers. To work around this problem, we create a separate
+        // CancellationTokenSource for every pipe.
+        using (var c = CancellationTokenSource.CreateLinkedTokenSource(_cancel.Token)) {
+          try {
+            // Allow all authenticated users to access the pipe.
+            var security = new PipeSecurity();
+            security.AddAccessRule(
+                new PipeAccessRule(
+                    new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+                    PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                    AccessControlType.Allow));
+            srv = new NamedPipeServerStream(
+                pipeName: name,
+                direction: PipeDirection.InOut,
+                maxNumberOfServerInstances: NamedPipeServerStream.MaxAllowedServerInstances,
+                transmissionMode: PipeTransmissionMode.Byte,
+                options: PipeOptions.Asynchronous | PipeOptions.WriteThrough,
+                inBufferSize: 0,
+                outBufferSize: 0,
+                pipeSecurity: security);
+            await srv.WaitForConnectionAsync(c.Token);
+            connected = true;
+            Update(() => {
               --free;
+              ++active;
+            });
+            await handler.Invoke(srv, c.Token);
+          } finally {
+            if (connected) {
+              try { srv.Disconnect(); } catch { }
             }
-          });
+            if (srv != null) {
+              try { srv.Dispose(); } catch { }
+            }
+            Update(() => {
+              if (connected) {
+                --active;
+              } else {
+                --free;
+              }
+            });
+          }
         }
       }
 
