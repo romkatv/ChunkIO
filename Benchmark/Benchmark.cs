@@ -115,28 +115,28 @@ namespace ChunkIO.Benchmark {
         Console.WriteLine("  SeekMany: {0:N0} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
     }
 
-    // Sample run on Intel Core i9-7900X with M.2 SSD:
+    // Sample run on AWS c4.xlarge, Windows Server 2016, .NET Framework 4.7.2:
     //
     //   ===[ Chunk Size 0KiB ]===
-    //     WriteMany: 450,816 records, 18,037,056 bytes, 15,023 records/sec, 601,048 bytes/sec.
-    //     ReadAll: 450,816 records, 18,037,056 bytes, 22,139 records/sec, 885,785 bytes/sec.
-    //     SeekMany: 60 seeks, 6.0 seeks/sec.
+    //     WriteMany: 245,760 records, 9,832,816 bytes, 8,186 records/sec, 327,501 bytes/sec.
+    //     ReadAll: 245,760 records, 9,832,816 bytes, 19,562 records/sec, 782,657 bytes/sec.
+    //     SeekMany: 71 seeks, 7.1 seeks/sec.
     //   ===[ Chunk Size 32KiB ]===
-    //     WriteMany: 24,065,792 records, 36,795,999 bytes, 802,140 records/sec, 1,226,452 bytes/sec.
-    //     ReadAll: 24,065,792 records, 36,795,999 bytes, 7,616,344 records/sec, 11,645,201 bytes/sec.
-    //     SeekMany: 4,573 seeks, 457.2 seeks/sec.
+    //     WriteMany: 18,106,368 records, 27,683,618 bytes, 603,490 records/sec, 922,702 bytes/sec.
+    //     ReadAll: 18,106,368 records, 27,683,618 bytes, 6,986,829 records/sec, 10,682,468 bytes/sec.
+    //     SeekMany: 2,152 seeks, 215.2 seeks/sec.
     //   ===[ Chunk Size 64KiB ]===
-    //     WriteMany: 19,598,848 records, 29,809,972 bytes, 653,238 records/sec, 993,579 bytes/sec.
-    //     ReadAll: 19,598,848 records, 29,809,972 bytes, 7,982,399 records/sec, 12,141,279 bytes/sec.
-    //     SeekMany: 4,539 seeks, 453.9 seeks/sec.
+    //     WriteMany: 18,492,928 records, 28,127,727 bytes, 616,395 records/sec, 937,536 bytes/sec.
+    //     ReadAll: 18,492,928 records, 28,127,727 bytes, 7,998,825 records/sec, 12,166,205 bytes/sec.
+    //     SeekMany: 2,592 seeks, 259.1 seeks/sec.
     //   ===[ Chunk Size 128KiB ]===
-    //     WriteMany: 25,313,792 records, 38,413,841 bytes, 843,494 records/sec, 1,280,008 bytes/sec.
-    //     ReadAll: 25,313,792 records, 38,413,841 bytes, 10,255,839 records/sec, 15,563,301 bytes/sec.
-    //     SeekMany: 4,006 seeks, 400.6 seeks/sec.
+    //     WriteMany: 18,695,424 records, 28,370,088 bytes, 623,020 records/sec, 945,425 bytes/sec.
+    //     ReadAll: 18,695,424 records, 28,370,088 bytes, 8,748,502 records/sec, 13,275,750 bytes/sec.
+    //     SeekMany: 2,479 seeks, 247.8 seeks/sec.
     //   ===[ Chunk Size 4096KiB ]===
-    //     WriteMany: 28,659,456 records, 43,398,456 bytes, 948,322 records/sec, 1,436,025 bytes/sec.
-    //     ReadAll: 28,659,456 records, 43,398,456 bytes, 11,226,253 records/sec, 16,999,697 bytes/sec.
-    //     SeekMany: 407 seeks, 40.6 seeks/sec.
+    //     WriteMany: 18,874,624 records, 28,581,520 bytes, 622,642 records/sec, 942,856 bytes/sec.
+    //     ReadAll: 18,874,624 records, 28,581,520 bytes, 8,909,494 records/sec, 13,491,494 bytes/sec.
+    //     SeekMany: 349 seeks, 34.8 seeks/sec.
     static async Task RunBenchmarks() {
       foreach (int chunkSizeKiB in new[] { 0, 32, 64, 128, 4 << 10 }) {
         Console.WriteLine("===[ Chunk Size {0}KiB ]===", chunkSizeKiB);
