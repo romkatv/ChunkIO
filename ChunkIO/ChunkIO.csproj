@@ -48,7 +48,6 @@
     <Compile Include="BufferedReader.cs" />
     <Compile Include="Format.cs" />
     <Compile Include="Compression.cs" />
-    <Compile Include="Log.cs" />
     <Compile Include="Pipe.cs" />
     <Compile Include="SipHash.cs" />
     <Compile Include="Event.cs" />
