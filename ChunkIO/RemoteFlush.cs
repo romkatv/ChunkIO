@@ -45,19 +45,19 @@ namespace ChunkIO {
       while (true) {
         using (var pipe = new NamedPipeClientStream(".", PipeName(fileId), PipeDirection.InOut,
                                                     PipeOptions.Asynchronous | PipeOptions.WriteThrough)) {
-          // NamedPipeClientStream has an awful API. It doesn't allow us to bail early if there is no pipe and
-          // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
-          // a mutex existence check and a loop. We create this mutex together with the pipe to serve as
-          // a marker of the pipe's existence. It's difficult to use the pipe itself as such marker because
-          // server pipes disappear after accepting and serving a request and there may be a short gap before
-          // we create new server connections.
-          if (Mutex.TryOpenExisting(MutexName(fileId), MutexRights.Synchronize, out Mutex mutex)) {
-            mutex.Dispose();
-          } else {
-            return null;
-          }
           await s_connect.LockAsync();
           try {
+            // NamedPipeClientStream has an awful API. It doesn't allow us to bail early if there is no pipe and
+            // to wait indefinitely if there is (this can be done with Win32 API). So we do it manually with
+            // a mutex existence check and a loop. We create this mutex together with the pipe to serve as
+            // a marker of the pipe's existence. It's difficult to use the pipe itself as such marker because
+            // server pipes disappear after accepting and serving a request and there may be a short gap before
+            // we create new server connections.
+            if (Mutex.TryOpenExisting(MutexName(fileId), MutexRights.Synchronize, out Mutex mutex)) {
+              mutex.Dispose();
+            } else {
+              return null;
+            }
             // The timeout is meant to avoid waiting forever if the pipe disappears between the moment
             // we have verified its existence and our attempt to connect to it. We use a mutex to
             // restrict the number of simultaneous ConnectAsync() because ConnectAsync() blocks a task
@@ -91,9 +91,6 @@ namespace ChunkIO {
       }
     }
 
-    public static IDisposable CreateListener(IReadOnlyCollection<byte> fileId, Func<bool, Task<long>> flush) =>
-        new Listener(fileId, flush);
-
     static string HexLowerCase(byte[] bytes) {
       return string.Join("", bytes.Select(b => b.ToString("x2")));
     }
@@ -103,7 +100,7 @@ namespace ChunkIO {
 
     static string MutexName(IReadOnlyCollection<byte> fileId) => @"Global\" + PipeName(fileId);
 
-    sealed class Listener : IDisposable {
+    public sealed class Listener : IDisposable, IAsyncDisposable {
       readonly PipeServer _srv;
       readonly Mutex _mutex;
 
@@ -141,13 +138,15 @@ namespace ChunkIO {
         }
       }
 
-      public void Dispose() {
+      public async Task DisposeAsync() {
         try {
-          _srv.Dispose();
+          await _srv.DisposeAsync();
         } finally {
           _mutex.Dispose();
         }
       }
+
+      public void Dispose() => DisposeAsync().Wait();
     }
   }
 }
