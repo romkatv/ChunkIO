@@ -68,13 +68,14 @@ Chunk header bytes:
 #### Writing
 
 ```csharp
-// Create a writer, write one chunk and flush.
+// Create a writer, write two identical chunks and flush.
 using (var writer = new ChunkWriter(fname)) {
-  await writer.WriteAsync(
-      new UserData() { ULong0 = 1, ULong1 = 2 },
-      new byte[] { 42, 69 },
-      offset: 0,
-      count: 2);
+  var content = new byte[] { 42, 69 };
+  for (int i = 0; i != 2; ++i) {
+    await writer.WriteAsync(
+        new UserData() { ULong0 = 1, ULong1 = 2 },
+        content, offset: 0, count: content.Length);
+  }
   await writer.FlushAsync(flushToDisk: true);
 }
 ```
