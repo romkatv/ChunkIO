@@ -105,11 +105,35 @@ namespace ChunkIO {
 
     // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
     //
+    // You can iterate over chunks by repeatedly calling ReadFirstAsync(chunk.EndPosition, long.MaxValue)
+    // until it returns null. This is efficient.
+    //
     // There are no constraints on the values of position boundaries. Even long.MinValue and
     // long.MaxValue are legal. If from >= to, the result is null.
     public async Task<InputChunk> ReadFirstAsync(long from, long to) =>
         await MakeChunk(await _reader.ReadFirstAsync(from, to), Scan.Forward, from, to);
 
+    // Returns the last chunk whose ChunkBeginPosition is in [from, to) or null.
+    //
+    // You can iterate over chunks backwards by repeatedly calling ReadLastAsync(0, chunk.BeginPosition)
+    // until it returns null. However, this is less efficient than iterating forward with ReadFirstAsync().
+    //
+    // There are no constraints on the values of position boundaries. Even long.MinValue and
+    // long.MaxValue are legal. If from >= to, the result is null.
+    public async Task<InputChunk> ReadLastAsync(long from, long to) =>
+        await MakeChunk(await _reader.ReadLastAsync(from, to), Scan.Backward, from, to);
+
+    // If there a writer writing to our file and it's running on the same machine, tells it to flush,
+    // waits for completion and returns the size of the file immediately after flushing. Otherwise returns
+    // the current file size.
+    //
+    // Throws if the writer is unable to flush (e.g., disk full).
+    //
+    // This method can be called concurrently with any other method and with itself.
+    //
+    // The implication is that all existing chunks with starting positions in
+    // [0, FlushRemoteWriterAsync(flushToDisk).Result) are guaranteed to be final and no new chunks will
+    // appear there.
     public async Task<long> FlushRemoteWriterAsync(bool flushToDisk) {
       long len = Length;
       long? res = await RemoteFlush.FlushAsync(Id, flushToDisk);
