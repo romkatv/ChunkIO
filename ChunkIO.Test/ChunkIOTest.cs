@@ -85,6 +85,54 @@ namespace ChunkIO.Test {
       }
     }
 
+    [TestMethod]
+    public void MaxChunkSizeTest() {
+      WithFile(Test).Wait();
+      async Task Test(string fname) {
+        using (var writer = new ChunkWriter(fname)) {
+          await Write(writer, Content(1, count: 1));
+          await Write(writer, Content(2, count: MaxContentLength));
+          await Write(writer, Content(3, count: 1));
+        }
+
+        using (var reader = new ChunkReader(fname)) {
+          IChunk chunk = await reader.ReadFirstAsync(0, long.MaxValue);
+          Assert.IsNotNull(chunk);
+          byte[] content = new byte[chunk.ContentLength];
+          Assert.IsTrue(await chunk.ReadContentAsync(content, 0));
+          CollectionAssert.AreEqual(Content(1, count: 1), content);
+
+          chunk = await reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
+          Assert.IsNotNull(chunk);
+          Assert.AreEqual(MaxContentLength, content.Length);
+          content = new byte[chunk.ContentLength];
+          Assert.IsTrue(await chunk.ReadContentAsync(content, 0));
+          foreach (byte x in content) {
+            if (x != 2) Assert.Fail($"Invalid byte: {x}");
+          }
+
+          chunk = await reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
+          Assert.IsNotNull(chunk);
+          content = new byte[chunk.ContentLength];
+          Assert.IsTrue(await chunk.ReadContentAsync(content, 0));
+          CollectionAssert.AreEqual(Content(3, count: 1), content);
+
+          chunk = await reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
+          Assert.IsNull(chunk);
+        }
+      }
+    }
+
+    [TestMethod]
+    public void ChunkTooBigTest() {
+      try {
+        // When this test starts failing, it's time to increase Format.MaxContentLength.
+        var chunk = new byte[MaxContentLength + 1];
+        Assert.Fail($"Must throw {nameof(OutOfMemoryException)}");
+      } catch (OutOfMemoryException) {
+      }
+    }
+
     static Task Write(ChunkWriter writer, byte[] chunk) => writer.WriteAsync(new UserData(), chunk, 0, chunk.Length);
 
     static byte[] Content(byte value, int count) {
