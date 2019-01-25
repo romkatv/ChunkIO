@@ -51,7 +51,7 @@ Every chunk starts with a header, followed by content.
 Chunk header bytes:
 
   * `[0, 16)`: User data. Can be anything.
-  * `[16, 24)`: Content length. Currently required to be in `[0, 2^31)`.
+  * `[16, 24)`: Content length. Currently required to be in `[0, 2^31 - 56)`.
   * `[24, 32)`: Hash of the content. Readers ignore content of chunks whose hash doesn't match.
   * `[32, 40)`: Hash of bytes `[0, 32)`. Readers ignore chunks whose header hash doesn't match.
 
