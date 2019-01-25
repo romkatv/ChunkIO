@@ -21,6 +21,23 @@ using System.Threading.Tasks;
 namespace ChunkIO {
   using static Format;
 
+  // Thread-compatible but not thread-safe. Think FileStream.
+  //
+  // Example: Write two chunks and flush to disk.
+  //
+  //   using (var writer = new ChunkWriter(fname)) {
+  //     await writer.WriteAsync(
+  //         new UserData() { ULong0 = 1, ULong1 = 2 },
+  //         new byte[] { 42, 69 },
+  //         offset: 0,
+  //         count: 2);
+  //     await writer.WriteAsync(
+  //         new UserData() { ULong0 = 3, ULong1 = 4 },
+  //         new byte[] { 8 },
+  //         offset: 0,
+  //         count: 1);
+  //     await writer.FlushAsync(flushToDisk: true);
+  //   }
   sealed class ChunkWriter : IDisposable {
     readonly ByteWriter _writer;
     readonly byte[] _header = new byte[ChunkHeader.Size];

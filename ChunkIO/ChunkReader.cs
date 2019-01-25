@@ -22,15 +22,65 @@ using System.Threading.Tasks;
 using static ChunkIO.Format;
 
 namespace ChunkIO {
+  // Essentially a wrapper around a file position and chunk header. It's guaranteed to
+  // correspond to a real chunk that was written by the user. E.g., the user always
+  // writes chunks of length 42 with user data containing 1337, ContentLength is
+  // guaranteed to be equal to 42 and user data to contain 1337 no matter how corrupted
+  // or truncated the file.
   interface IChunk {
+    // File position where this chunk starts. To read the chunk right before this one,
+    // call ChunkReader.ReadLastChunk(0, BeginPosition). That is, ask for the last chunk
+    // whose start position is less than this chunk's start position.
     long BeginPosition { get; }
+
+    // Past-the-end file position where this chunk ends.
+    // Unless you've successfully read the chunk's content with ReadContentAsync and thus
+    // implicitly verified that the chunk isn't corrupted, there is no guarantee that the
+    // chunk is indeed this long. If this chunk is corrupted, there may be valid chunks
+    // before this chunk allegedly ends.
+    //
+    // If you want to find the next chunk after this, the safe way to do that is to call
+    // ChunkReader.ReadFirstAsync(BeginPosition + 1, long.MaxValue). In other words, look
+    // for the first chunk whose start position is greater than this chunks start position.
     long EndPosition { get; }
+
+    // Length of the user-supplied content. It corresponds to the count argument of
+    // ChunkWriter.Write().
     int ContentLength { get; }
+
+    // Chunk's user data. It corresponds to the userData argument of ChunkWriter.Write().
     UserData UserData { get; }
 
+    // Reads this chunk's content and writes it into the specified array starting at the
+    // specified offset. The array must be long enough to accomodate all ContentLength
+    // bytes of content.
+    //
+    // Returns true on success, false on content hash mismatch (corrupted chunk content).
+    // Throws on invalid arguments and IO errors.
     Task<bool> ReadContentAsync(byte[] array, int offset);
   }
 
+  // Thread-compatible but not thread-safe. Think FileStream.
+  //
+  // Example: Print all chunks in a file.
+  //
+  //   async Task PrintAllChunks(string fname) {
+  //     using (var reader = new ChunkReader(fname)) {
+  //       long pos = 0;
+  //       while (true) {
+  //         IChunk chunk = await reader.ReadFirstAsync(pos, long.MaxValue);
+  //         if (chunk == null) break;
+  //         Console.WriteLine("User data: {0}, {1}.", chunk.UserData.ULong0, chunk.UserData.ULong1);
+  //         byte[] content = new byte[chunk.ContentLength];
+  //         if (await chunk.ReadContentAsync(content, 0)) {
+  //           Console.WriteLine("Content: [{0}].", string.Join(", ", content));
+  //         } else {
+  //           Console.WriteLine("Content: corrupted.");
+  //         }
+  //         pos = chunk.BeginPosition + 1;
+  //       }
+  //     }
+  //   }
   sealed class ChunkReader : IDisposable {
     readonly ByteReader _reader;
     readonly byte[] _meter = new byte[Meter.Size];
@@ -50,37 +100,41 @@ namespace ChunkIO {
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadFirstAsync(long from, long to) {
       long len = Length;
-      if (to <= 0 || from >= len || from >= to) return null;
-      if (from > _last?.BeginPosition && from <= _last?.EndPosition && await _last.IsSkippable()) {
-        IChunk res = await Scan(_last.EndPosition);
-        if (res != null) return res;
-      }
-      bool meters = false;
-      for (long m = MeterBefore(Math.Max(0, from)); m < Math.Min(len, to); m += MeterInterval) {
-        Meter? meter = await ReadMeter(m);
-        if (!meter.HasValue) continue;
-        meters = true;
-        IChunk res = await Scan(meter.Value.ChunkBeginPosition);
-        if (res != null) return res;
-      }
-      if (meters) return null;
-      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
-      // be able to get to them by scanning from the last chunk in [0, from).
-      Chunk prev = (Chunk)await ReadLastAsync(0, from);
-      return prev == null || !await prev.IsSkippable() ? null : await Scan(prev.EndPosition);
+      if (!Clamp(ref from, ref to, len)) return null;
 
-      async Task<IChunk> Scan(long h) {
-        while (h < to) {
-          ChunkHeader? header = await ReadChunkHeader(h);
-          if (!header.HasValue) break;
-          if (h >= from) {
-            _last = new Chunk(this, h, header.Value);
-            return _last;
-          }
-          if (!await IsSkippable(h, header.Value)) break;
-          h = header.Value.EndPosition(h).Value;
+      IChunk res = null;
+      if (!await ReadNext(_last) && !await ReadNext((Chunk)await ReadLastAsync(0, from))) await Scan();
+      return res;
+
+      async Task Scan() {
+        Debug.Assert(res == null);
+        for (long m = MeterAfter(from); m < len; m += MeterInterval) {
+          Debug.Assert(m >= from);
+          Meter? meter = await ReadMeter(m);
+          if (!meter.HasValue) continue;
+          Debug.Assert(meter.Value.ChunkBeginPosition >= from);
+          if (meter.Value.ChunkBeginPosition >= to) break;
+          res = await Read(meter.Value.ChunkBeginPosition);
+          if (res != null) break;
         }
-        return null;
+      }
+
+      async Task<bool> ReadNext(Chunk prev) {
+        Debug.Assert(res == null);
+        if (prev != null && prev.BeginPosition < from && prev.EndPosition >= from && await prev.IsSkippable()) {
+          from = prev.EndPosition;
+          if (!Clamp(ref from, ref to, len)) return true;
+          res = await Read(from);
+        }
+        return res != null;
+      }
+
+      async Task<IChunk> Read(long pos) {
+        Debug.Assert(pos >= from && pos < to);
+        ChunkHeader? header = await ReadChunkHeader(pos);
+        if (!header.HasValue) return null;
+        _last = new Chunk(this, pos, header.Value);
+        return _last;
       }
     }
 
@@ -88,39 +142,44 @@ namespace ChunkIO {
     // No requirements on the arguments. If `from >= to` or `to <= 0`, the result is null.
     public async Task<IChunk> ReadLastAsync(long from, long to) {
       long len = Length;
-      if (to <= 0 || from >= len || from >= to) return null;
-      bool meters = false;
-      for (long m = MeterBefore(Math.Min(to - 1, len)); m >= 0 && from < to; m -= MeterInterval) {
+      if (!Clamp(ref from, ref to, len)) return null;
+
+      for (long m = MeterAfter(to); m < len; m += MeterInterval) {
+        Debug.Assert(m >= to);
+        Meter? meter = await ReadMeter(m);
+        if (!meter.HasValue) continue;
+        if (meter.Value.ChunkBeginPosition < to) {
+          IChunk res = await Scan(meter.Value.ChunkBeginPosition);
+          if (res != null) return res;
+        }
+        break;
+      }
+
+      for (long m = MeterBefore(to - 1); m >= 0 && from < to; m -= MeterInterval) {
         Debug.Assert(m < to);
         Meter? meter = await ReadMeter(m);
         if (!meter.HasValue) continue;
-        meters = true;
         IChunk res = await Scan(meter.Value.ChunkBeginPosition);
         if (res != null) return res;
         Debug.Assert(MeterBefore(meter.Value.ChunkBeginPosition) <= m);
         m = MeterBefore(meter.Value.ChunkBeginPosition);
         to = meter.Value.ChunkBeginPosition;
       }
-      // If there are valid chunks in [from, to) but all meters embedded in them are corrupted, we might still
-      // be able to get to them by scanning from the last known valid chunk in [0, from).
-      if (meters || from >= to) return null;
-      if (from == 0) await Scan(_last?.BeginPosition < to ? _last.BeginPosition : 0);
-      Chunk prev = (Chunk)await ReadLastAsync(0, from);
-      return prev?.EndPosition < to && await prev.IsSkippable() ? await Scan(prev.EndPosition) : null;
+      return null;
 
-      async Task<IChunk> Scan(long h) {
+      async Task<IChunk> Scan(long pos) {
         ChunkHeader? res = null;
         while (true) {
-          Debug.Assert(h < to);
-          ChunkHeader? header = await ReadChunkHeader(h);
+          Debug.Assert(pos < to);
+          ChunkHeader? header = await ReadChunkHeader(pos);
           if (!header.HasValue) break;
-          if (h >= from) res = header;
-          long next = header.Value.EndPosition(h).Value;
-          if (next >= to) break;
-          if (!await IsSkippable(h, header.Value)) break;
-          h = next;
+          if (pos >= from) res = header;
+          long end = header.Value.EndPosition(pos).Value;
+          if (end >= to) break;
+          if (!await IsSkippable(pos, header.Value)) break;
+          pos = end;
         }
-        return res.HasValue ? new Chunk(this, h, res.Value) : null;
+        return res.HasValue ? new Chunk(this, pos, res.Value) : null;
       }
     }
 
@@ -150,6 +209,12 @@ namespace ChunkIO {
 
     static long MeterBefore(long pos) => pos / MeterInterval * MeterInterval;
     static long MeterAfter(long pos) => MeterBefore(pos + MeterInterval - 1);
+
+    static bool Clamp(ref long from, ref long to, long len) {
+      from = Math.Max(from, 0);
+      to = Math.Min(to, len);
+      return from < to;
+    }
 
     // Returns true if it's safe to read the chunk after the specified chunk. There are
     // two cases where blindly reading the next chunk can backfire:
@@ -226,6 +291,10 @@ namespace ChunkIO {
       public long EndPosition => _header.EndPosition(BeginPosition).Value;
       public int ContentLength => _header.ContentLength;
       public UserData UserData => _header.UserData;
+
+      public async Task<bool> IsNext(long begin) {
+        return begin > BeginPosition && begin <= EndPosition && await IsSkippable();
+      }
 
       public async Task<bool> IsSkippable() {
         if (_skippable == null) _skippable = await _reader.IsSkippable(BeginPosition, _header);
