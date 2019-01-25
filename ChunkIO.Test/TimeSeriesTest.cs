@@ -67,7 +67,7 @@ namespace ChunkIO.Test {
       Debug.Assert(start > 0);
       Debug.Assert(count >= 0);
       Debug.Assert(bufRecs > 0);
-      using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null })) {
+      using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null, DisposeFlushToDisk = false })) {
         for (long i = start; i != start + count; ++i) {
           await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
           if ((i - start + 1) % bufRecs == 0) await Flush();
@@ -262,6 +262,7 @@ namespace ChunkIO.Test {
         var opt = new WriterOptions() {
           CloseChunk = new Triggers() { Size = 0 },
           FlushToOS = new Triggers() { Size = 0 },
+          DisposeFlushToDisk = false,
         };
         using (var writer = new Writer(fname, opt)) {
           long written = 0;
@@ -304,6 +305,7 @@ namespace ChunkIO.Test {
         FlushToOS = new Triggers() {
           Size = 0,
         },
+        DisposeFlushToDisk = false,
       })).Wait();
       RunTest((string fname) => Test(fname, new WriterOptions() {
         CloseChunk = new Triggers() {
@@ -314,6 +316,7 @@ namespace ChunkIO.Test {
           Age = TimeSpan.Zero,
           AgeRetry = TimeSpan.Zero,
         },
+        DisposeFlushToDisk = false,
       })).Wait();
       RunTest((string fname) => Test(fname, new WriterOptions() {
         CloseChunk = new Triggers() {
@@ -324,6 +327,7 @@ namespace ChunkIO.Test {
           Age = TimeSpan.Zero,
           AgeRetry = TimeSpan.Zero,
         },
+        DisposeFlushToDisk = false,
       })).Wait();
 
       async Task Test(string fname, WriterOptions opt) {

@@ -111,6 +111,10 @@ namespace ChunkIO {
   public class WriterOptions {
     public bool AllowRemoteFlush { get; set; } = true;
 
+    // BufferedWriter.Dispose() and BufferedWriter.DisposeAsync() invoke BufferedWriter.FlushAsync(arg) on
+    // the first call. DisposeFlushToDisk is the argument.
+    public bool DisposeFlushToDisk { get; set; } = true;
+
     public CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Optimal;
 
     // CloseChunk triggers define when a chunk should be auto-closed. See comments
@@ -224,7 +228,7 @@ namespace ChunkIO {
           if (_disposed) return;
           _disposed = true;
           try {
-            await DoCloseChunk(flushToDisk: false);
+            await DoCloseChunk(flushToDisk: _opt.DisposeFlushToDisk);
           } finally {
             _closeChunk.Stop();
             _flushToOS.Stop();
