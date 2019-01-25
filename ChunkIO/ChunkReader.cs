@@ -292,10 +292,6 @@ namespace ChunkIO {
       public int ContentLength => _header.ContentLength;
       public UserData UserData => _header.UserData;
 
-      public async Task<bool> IsNext(long begin) {
-        return begin > BeginPosition && begin <= EndPosition && await IsSkippable();
-      }
-
       public async Task<bool> IsSkippable() {
         if (_skippable == null) _skippable = await _reader.IsSkippable(BeginPosition, _header);
         return _skippable.Value;
