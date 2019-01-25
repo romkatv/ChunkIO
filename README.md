@@ -108,7 +108,7 @@ using (var reader = new ChunkReader(fname)) {
   * Incremental writing and reading of chunks. This is what "buffered" in the class names refers to.
   * Chunk content compression.
   * Automatic flushing of data based on size and/or time triggers.
-  * Remote flush, which allows readers to ask writers to flush their buffers even if they happen to run in different processes (communications is done via named pipes, whose names are derived from file names).
+  * Remote flush, which allows readers to ask writers to flush their buffers even if they happen to run in different processes (communications is done via named pipes, whose names are derived from file IDs).
   * Binary search for chunks based on the user-supplied predicate for user data.
 
 *This API is currently private.*
