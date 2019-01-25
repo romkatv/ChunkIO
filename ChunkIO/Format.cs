@@ -21,7 +21,8 @@ using System.Threading.Tasks;
 
 namespace ChunkIO {
   static class Format {
-    public const int MaxContentLength = int.MaxValue;
+    // This is the maximum length of byte[] in .NET.
+    public const int MaxContentLength = 2147483591;
     public const long MaxPosition = long.MaxValue;
     public const int MeterInterval = 64 << 10;
 
