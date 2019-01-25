@@ -399,11 +399,76 @@ namespace ChunkIO.Test {
     }
 
     [TestMethod]
-    public void ConcurrentTest() {
+    public void ConcurrentReadWriteTest() {
       RunTest(async (string fname, long n, long bufRecs) => {
         Task w = Write(fname, 1, n, bufRecs);
         while (!w.IsCompleted) {
           await VerifyFile(fname, n, bufRecs, FileState.Expanding);
+        }
+      }).Wait();
+    }
+
+    [TestMethod]
+    public void ConcurrentWriteDisposeTest() {
+      RunTest(async (string fname) => {
+        const int N = 8 << 10;
+        const int M = 4;
+        int written = 0;
+
+        using (var writer = new Writer(fname, new WriterOptions())) {
+          async Task Do(Func<Task> action) {
+            try {
+              while (true) {
+                try {
+                  await action.Invoke();
+                  break;
+                } catch (InjectedWriteException) {
+                } catch (IOException) {
+                }
+              }
+            } catch (ObjectDisposedException) {
+            }
+          }
+
+          async Task Write(int x) {
+            for (int i = 0; i != M; ++i) {
+              int val = x * M + i + 1;
+              await Task.Yield();
+              await Do(() => writer.Write(new Event<long>(new DateTime(val, DateTimeKind.Utc), val)));
+            }
+            await Do(() => writer.FlushAsync(flushToDisk: false));
+            await Do(() => RemoteFlush.FlushAsync(writer.Id, flushToDisk: false));
+            if (Interlocked.Increment(ref written) >= N) {
+              await Do(() => writer.DisposeAsync());
+            }
+          }
+
+          await Task.WhenAll(Enumerable.Range(0, 2 * N).Select(Write));
+        }
+
+        using (var reader = new Reader(fname)) {
+          async Task<T> Do<T>(Func<Task<T>> action) {
+            while (true) {
+              try {
+                return await action.Invoke();
+              } catch (InjectedReadException) {
+              }
+            }
+          }
+
+          var read = new HashSet<long>();
+          using (var enumerator = reader.ReadAfter(DateTime.MinValue).GetAsyncEnumerator()) {
+            while (await Do(() => enumerator.MoveNextAsync(CancellationToken.None))) {
+              IDecodedChunk<Event<long>> chunk = enumerator.Current;
+              foreach (Event<long> e in chunk) {
+                Assert.IsTrue(e.Value > 0);
+                Assert.IsTrue(e.Value <= 2 * N * M);
+                Assert.AreEqual(e.Value, e.Timestamp.Ticks);
+                Assert.IsTrue(read.Add(e.Value) || ByteWriter.ErrorInjector != null);
+              }
+            }
+          }
+          Assert.IsTrue(read.Count >= N * M);
         }
       }).Wait();
     }
