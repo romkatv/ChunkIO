@@ -145,7 +145,7 @@ namespace ChunkIO {
     }
   }
 
-  // It's allowed to call all public methods of BufferedWriter concurrently, even Dispose().
+  // It's allowed to call all public methods of BufferedWriter concurrently, even Dispose() and DisposeAsync().
   sealed class BufferedWriter : IDisposable, IAsyncDisposable {
     readonly AsyncMutex _mutex = new AsyncMutex();
     readonly WriterOptions _opt;

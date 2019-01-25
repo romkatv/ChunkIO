@@ -15,6 +15,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -56,10 +57,33 @@ namespace ChunkIO {
     long EndPosition { get; }
   }
 
+  public enum TimeSeriesWriteResult {
+    // Record successfully added to the buffer (current chunk). There is no point in trying to
+    // write the same record. Doing so can result in duplicates.
+    RecordBuffered,
+    // Record dropped on the floor.
+    RecordDropped,
+    // Record dropped on the floor, together with all other records that were
+    // previously added to the buffer (current chunk).
+    ChunkDropped,
+  }
+
+  public class TimeSeriesWriteException : Exception {
+    public TimeSeriesWriteException(Exception inner, TimeSeriesWriteResult result) : base(result.ToString(), inner) {
+      Result = result;
+    }
+
+    // If Result is RecordBuffered, it means there was an IO error when flushing data to disk after
+    // adding the record to the buffer (current chunk). The record is not lost. The next flush will
+    // attempt to write it again.
+    public TimeSeriesWriteResult Result { get; }
+  }
+
   // Writer for timestamped records.
+  //
+  // It's allowed to call all public methods of TimeSeriesWriter concurrently, even Dispose() and DisposeAsync().
   public class TimeSeriesWriter<T> : IDisposable, IAsyncDisposable {
     readonly BufferedWriter _writer;
-    long _chunkRecords = 0;
 
     // The file must be exclusively writable. If it exists, it gets appended to.
     // You can use TimeSeriesReader to read the file. You can even do it while
@@ -86,84 +110,39 @@ namespace ChunkIO {
     // the completion of the task it returns.
     public ITimeSeriesEncoder<T> Encoder { get; }
 
-    // The number of records that have been written through this instance of TimeSeriesWriter.
-    // Some records may not yet have been flushed to disk or even to OS. However, it's guaranteed
-    // that should FlushAsync() succeed, the specified number of records will definitely have
-    // appeared in the file.
-    //
-    // RecordsWritten can change only during Write(). It can either go up by one, or down by any
-    // amount.
-    //
-    // It's illegal to read RecordsWritten concurrently with Write() or with the task it returns.
-    //
-    // This field can be used to figure out whether the same record should be passed to Write() again
-    // after an exception.
-    //
-    //   async Task WriteReliably(TimeSeriesWriter<T> writer, T record) {
-    //     while (true) {
-    //       long written = writer.RecordsWritten;
-    //       try {
-    //         await writer.Write(record);
-    //         return;
-    //       } catch {
-    //         if (writer.RecordsWritten > written) {
-    //           // Record has been added to the chunk but the chunk couldn't be written to file.
-    //           // The most common reason is full disk. We shouldn't attempt to write
-    //           // the same record again. To persist it, we will call FlushAsync(). If we don't do
-    //           // that, the next call to Write() will automatically call FlushAsync() and will
-    //           // throw on error without writing the new record to the chunk.
-    //           break;
-    //         } else {
-    //           Console.Error.WriteLine("Failed to write record. Will retry in 5 seconds.");
-    //           await Task.Delay(TimeSpan.FromSeconds(5));
-    //         }
-    //       }
-    //     }
-    //
-    //     while (true) {
-    //       try {
-    //         await writer.FlushAsync(flushToDisk: false);
-    //         return;
-    //       } catch {
-    //         Console.Error.WriteLine("Failed to flush. Will retry in 5 seconds.");
-    //         await Task.Delay(TimeSpan.FromSeconds(5));
-    //       }
-    //     }
-    //   }
-    public long RecordsWritten { get; internal set; }
-
     // Throws on IO errors. Can block on IO.
     //
-    // It's illegal to call Write() before the task returned by the previous call to Write() has completed.
+    // The only exception it throws is TimeSeriesWriteException. You can examine its Result field
+    // to figure out what happened to the record you were trying to write. InnerException is the
+    // culprit. It's never null.
     public async Task Write(T val) {
-      IOutputChunk buf = await _writer.LockChunk();
+      TimeSeriesWriteResult res = TimeSeriesWriteResult.RecordDropped;
       try {
-        if (buf.IsNew) {
-          _chunkRecords = 0;
-          buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
-          // If the block is set up to automatically close after a certain number of bytes is
-          // written, tell it to exclude snapshot bytes from the calculation. This is necessary
-          // to avoid creating a new block on every call to Write() if snapshots happen to
-          // be large.
-          if (buf.CloseAtSize.HasValue) buf.CloseAtSize += buf.Stream.Length;
-        } else {
-          Encoder.EncodeSecondary(buf.Stream, val);
+        IOutputChunk buf = await _writer.LockChunk();
+        try {
+          if (buf.IsNew) {
+            buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
+            // If the block is set up to automatically close after a certain number of bytes is
+            // written, tell it to exclude snapshot bytes from the calculation. This is necessary
+            // to avoid creating a new block on every call to Write() if snapshots happen to
+            // be large.
+            if (buf.CloseAtSize.HasValue) buf.CloseAtSize += buf.Stream.Length;
+          } else {
+            Encoder.EncodeSecondary(buf.Stream, val);
+          }
+          res = TimeSeriesWriteResult.RecordBuffered;
+        } catch {
+          res = TimeSeriesWriteResult.ChunkDropped;
+          buf.Abandon();
+          throw;
+        } finally {
+          await buf.DisposeAsync();
         }
-        ++_chunkRecords;
-        ++RecordsWritten;
-      } catch {
-        RecordsWritten -= _chunkRecords;
-        _chunkRecords = 0;
-        buf.Abandon();
-        throw;
-      } finally {
-        await buf.DisposeAsync();
+      } catch (Exception e) {
+        throw new TimeSeriesWriteException(e, res);
       }
     }
 
-    // It's legal to call FlushAsync() from any thread and concurrently with Write() or another FlushAsync().
-    // However, if FlushAsync() is called while there is an inflight write, it won't complete until the write
-    // completes.
     public Task FlushAsync(bool flushToDisk) => _writer.FlushAsync(flushToDisk);
 
     public Task DisposeAsync() => DisposeAsync(true);

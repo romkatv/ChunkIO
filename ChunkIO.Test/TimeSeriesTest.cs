@@ -70,8 +70,7 @@ namespace ChunkIO.Test {
       using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null })) {
         for (long i = start; i != start + count; ++i) {
           await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
-          Assert.AreEqual(i - start + 1, writer.RecordsWritten);
-          if (writer.RecordsWritten % bufRecs == 0) await Flush();
+          if ((i - start + 1) % bufRecs == 0) await Flush();
         }
         await Flush();
 
@@ -265,21 +264,28 @@ namespace ChunkIO.Test {
           FlushToOS = new Triggers() { Size = 0 },
         };
         using (var writer = new Writer(fname, opt)) {
+          long written = 0;
           while (true) {
             try {
-              long n = writer.RecordsWritten + 1;
-              await writer.Write(new Event<long>(new DateTime(n, DateTimeKind.Utc), n));
+              await writer.Write(new Event<long>(new DateTime(written + 1, DateTimeKind.Utc), written + 1));
+              ++written;
               break;
-            } catch (InjectedWriteException) {
+            } catch (TimeSeriesWriteException e) {
+              Assert.IsInstanceOfType(e.InnerException, typeof(InjectedWriteException));
+              if (e.Result == TimeSeriesWriteResult.RecordBuffered) {
+                ++written;
+              } else {
+                Assert.AreEqual(TimeSeriesWriteResult.RecordDropped, e.Result);
+              }
             }
           }
-          Assert.IsTrue(writer.RecordsWritten > 0);
+          Assert.IsTrue(written > 0);
           while (true) {
             ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
-            if (stats.Total >= writer.RecordsWritten) {
+            if (stats.Total >= written) {
               Assert.AreEqual(1, stats.First);
-              Assert.AreEqual(writer.RecordsWritten, stats.Last);
-              Assert.AreEqual(writer.RecordsWritten, stats.Total);
+              Assert.AreEqual(written, stats.Last);
+              Assert.AreEqual(written, stats.Total);
               break;
             }
             await Task.Delay(TimeSpan.FromMilliseconds(1));
@@ -422,8 +428,11 @@ namespace ChunkIO.Test {
                 try {
                   await action.Invoke();
                   break;
+                } catch (TimeSeriesWriteException e) {
+                  Assert.IsInstanceOfType(e.InnerException, typeof(InjectedWriteException));
                 } catch (InjectedWriteException) {
-                } catch (IOException) {
+                } catch (IOException e) {
+                  Assert.AreEqual("Remote writer failed to flush", e.Message);
                 }
               }
             } catch (ObjectDisposedException) {
