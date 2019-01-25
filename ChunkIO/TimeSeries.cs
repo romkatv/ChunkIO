@@ -57,7 +57,7 @@ namespace ChunkIO {
   }
 
   // Writer for timestamped records.
-  public class TimeSeriesWriter<T> : IDisposable {
+  public class TimeSeriesWriter<T> : IDisposable, IAsyncDisposable {
     readonly BufferedWriter _writer;
     long _chunkRecords = 0;
 
@@ -166,21 +166,22 @@ namespace ChunkIO {
     // completes.
     public Task FlushAsync(bool flushToDisk) => _writer.FlushAsync(flushToDisk);
 
-    // Can block on IO and throw on IO errors. Will do neither of these if you call FlushAsync() beforehand and
-    // wait for its successful completion.
-    public void Dispose() => Dispose(true);
+    public Task DisposeAsync() => DisposeAsync(true);
 
     // Inheriting from TimeSeriesWriter?
     // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
-    protected virtual void Dispose(bool disposing) {
+    protected async Task DisposeAsync(bool disposing) {
       if (disposing) {
         try {
-          _writer.Dispose();
+          await _writer.DisposeAsync();
         } finally {
           Encoder.Dispose();
         }
       }
     }
+
+    // Can block on IO and throw on IO errors. Use DisposeAsync() instead if you can.
+    public void Dispose() => DisposeAsync().Wait();
   }
 
   // Reader for timestamped records.

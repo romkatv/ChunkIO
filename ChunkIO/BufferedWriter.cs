@@ -146,11 +146,11 @@ namespace ChunkIO {
   }
 
   // It's allowed to call all public methods of BufferedWriter concurrently, even Dispose().
-  sealed class BufferedWriter : IDisposable {
+  sealed class BufferedWriter : IDisposable, IAsyncDisposable {
     readonly AsyncMutex _mutex = new AsyncMutex();
     readonly WriterOptions _opt;
     readonly ChunkWriter _writer;
-    readonly IDisposable _listener;
+    readonly IAsyncDisposable _listener;
     readonly Timer _closeChunk;
     readonly Timer _flushToOS;
     readonly Timer _flushToDisk;
@@ -169,7 +169,7 @@ namespace ChunkIO {
       _closeChunk = new Timer(_mutex, () => DoCloseChunk(flushToDisk: null), _opt.CloseChunk?.AgeRetry);
       _flushToOS = new Timer(_mutex, () => DoFlush(flushToDisk: false), _opt.FlushToOS?.AgeRetry);
       _flushToDisk = new Timer(_mutex, () => DoFlush(flushToDisk: true), _opt.FlushToDisk?.AgeRetry);
-      if (_opt.AllowRemoteFlush) _listener = RemoteFlush.CreateListener(_writer.Id, FlushAsync);
+      if (_opt.AllowRemoteFlush) _listener = new RemoteFlush.Listener(_writer.Id, FlushAsync);
     }
 
     public IReadOnlyCollection<byte> Id => _writer.Id;
@@ -216,11 +216,11 @@ namespace ChunkIO {
       return _writer.Length;
     });
 
-    public void Dispose() {
+    public async Task DisposeAsync() {
       try {
-        _listener?.Dispose();
+        if (_listener != null) await _listener.DisposeAsync();
       } finally {
-        _mutex.WithLock(async () => {
+        await _mutex.WithLock(async () => {
           if (_disposed) return;
           _disposed = true;
           try {
@@ -231,9 +231,11 @@ namespace ChunkIO {
             _flushToDisk.Stop();
             _writer.Dispose();
           }
-        }).Wait();
+        });
       }
     }
+
+    public void Dispose() => DisposeAsync().Wait();
 
     async Task DoCloseChunk(bool? flushToDisk) {
       Debug.Assert(_mutex.IsLocked);

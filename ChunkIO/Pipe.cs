@@ -25,10 +25,10 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace ChunkIO {
-  sealed class PipeServer : IDisposable {
+  sealed class PipeServer : IAsyncDisposable {
     readonly CancellationTokenSource _cancel = new CancellationTokenSource();
     readonly Task _srv;
-    bool _stopped = false;
+    int _disposed = 0;
 
     // Creates a multi-threaded named pipe server. It keeps the specified number of "free"
     // instances that are listening for incoming connections. The total number of instances
@@ -139,26 +139,18 @@ namespace ChunkIO {
             }
             await wake;
           }
+          _cancel.Dispose();
           if (!ok) throw;
         }
       }
     }
 
     // Cancel all outstanding instances (both free and active) and stop the listening loop.
-    // Only after that the task will complete.
-    //
-    // Does nothing if it's not the first call.
-    public async Task Stop() {
-      if (_stopped) return;
-      _stopped = true;
-      _cancel.Cancel();
-      try {
-        await _srv;
-      } finally {
-        _cancel.Dispose();
-      }
+    // Can be called many times and even concurrently. The server is guaranteed to be fully
+    // stopped when the task completes
+    public Task DisposeAsync() {
+      if (Interlocked.Exchange(ref _disposed, 1) == 0) _cancel.Cancel();
+      return _srv;
     }
-
-    public void Dispose() => Stop().Wait();
   }
 }

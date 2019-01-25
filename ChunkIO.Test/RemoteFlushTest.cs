@@ -33,7 +33,7 @@ namespace ChunkIO.Test {
         flushes.Add(flushToDisk);
         return Task.FromResult<long>(42);
       }
-      using (var listener = RemoteFlush.CreateListener(Id("test"), Flush)) {
+      using (var listener = new RemoteFlush.Listener(Id("test"), Flush)) {
         Assert.AreEqual(42, RemoteFlush.FlushAsync(Id("test"), true).Result);
         Assert.AreEqual(42, RemoteFlush.FlushAsync(Id("test"), false).Result);
       }
@@ -45,7 +45,7 @@ namespace ChunkIO.Test {
       Test().Wait();
       async Task Test() {
         Task<long> Flush(bool flushToDisk) => throw new NotImplementedException();
-        using (var listener = RemoteFlush.CreateListener(Id("test"), Flush)) {
+        using (var listener = new RemoteFlush.Listener(Id("test"), Flush)) {
           try {
             await RemoteFlush.FlushAsync(Id("test"), true);
             Assert.Fail("Must throw");
@@ -67,7 +67,7 @@ namespace ChunkIO.Test {
         async Task Flush() {
           Assert.AreEqual(42, await RemoteFlush.FlushAsync(Id("test"), false));
         }
-        using (var listener = RemoteFlush.CreateListener(Id("test"), _ => Task.FromResult<long>(42))) {
+        using (var listener = new RemoteFlush.Listener(Id("test"), _ => Task.FromResult<long>(42))) {
           try {
             Task.WhenAll(Enumerable.Range(0, 2048).Select(_ => Flush())).Wait();
           } catch {
@@ -86,7 +86,7 @@ namespace ChunkIO.Test {
       try {
         for (int i = 0; i != 2048; ++i) {
           int n = i;
-          listeners.Add(RemoteFlush.CreateListener(Id(n.ToString()), _ => Task.FromResult<long>(n)));
+          listeners.Add(new RemoteFlush.Listener(Id(n.ToString()), _ => Task.FromResult<long>(n)));
         }
         Task.WhenAll(Enumerable.Range(0, listeners.Count).Select(Flush)).Wait();
       } finally {
