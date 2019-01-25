@@ -36,6 +36,29 @@ namespace ChunkIO {
     public UserData UserData { get; }
   }
 
+  // Example: Create a reader, seek to a chunk based on user data, print all records in the following chunks.
+  //
+  //   using (var reader = new BufferedReader(fname)) {
+  //     // If there is a writer writing to our file, tell it to flush to OS.
+  //     // We now have a guarantee that all chunks with start positions in
+  //     // [0, len) are final. They cannot change.
+  //     long len = await reader.FlushRemoteWriterAsync(flushToDisk: false);
+  //     // Assuming that chunks are partitioned with respect to the predicate
+  //     // such that falsy chunks cannot follow truthy chunks, find the last
+  //     // falsy chunk or the very first chunk if none are falsy.
+  //     InputChunk chunk = await reader.ReadAtPartitionAsync(0, len, (UserData d) => d.ULong1 > 1);
+  //     while (chunk != null) {
+  //       Console.WriteLine("User data: {0}, {1}.", chunk.UserData.ULong0, chunk.UserData.ULong1);
+  //       // Assume that all records in the chunk are two bytes.
+  //       Debug.Assert(chunk.Length % 2 == 0);
+  //       while (chunk.Position != chunk.Length) {
+  //         Console.WriteLine("Record: [{0}, {1}]", chunk.ReadByte(), chunk.ReadByte());
+  //       }
+  //       // Read the first chunk whose start position is in [chunk.EndPosition, len).
+  //       // A.K.A. the next chunk.
+  //       chunk = await reader.ReadFirstAsync(chunk.EndPosition, len);
+  //     }
+  //   }
   sealed class BufferedReader : IDisposable {
     readonly ChunkReader _reader;
 

@@ -150,6 +150,31 @@ namespace ChunkIO {
   }
 
   // It's allowed to call all public methods of BufferedWriter concurrently, even Dispose() and DisposeAsync().
+  //
+  // Example: Create a writer, write two identical two-byte records and flush.
+  //
+  //   var opt = new WriterOptions() {
+  //     // Auto-close chunks when they get big or old enough.
+  //     CloseChunk = new Triggers { Size = 32 << 10, Age = TimeSpan.FromSeconds(60) },
+  //     // Flush data to disk (ala fsync) when it gets old enough.
+  //     FlushToDisk = new Triggers { Age = TimeSpan.FromSeconds(300) },
+  //   };
+  //   async using (var writer = new BufferedWriter(fname, opt)) {
+  //     // Write two identical records. They may end up in two different chunks if CloseChunk,
+  //     // FlushToOS or FlushToDisk is triggered after the first record is written. Or if a reader
+  //     // remotely triggers flush.
+  //     for (int i = 0; i != 2; ++i) {
+  //       async using (IOutputChunk chunk = await writer.LockChunk()) {
+  //         // If LockChunk() gave us a brand new chunk, set user data.
+  //         if (chunk.IsNew) chunk.UserData = new UserData() { ULong0 = 1, ULong1 = 2 };
+  //         // Write one record. The cannot be written to disk until we unlock it by
+  //         // disposing the local `chunk` handle.
+  //         chunk.Stream.WriteByte(42);
+  //         chunk.Stream.WriteByte(69);
+  //       }
+  //       async writer.FlushAsync(flushToDisk: true);
+  //     }
+  //   }
   sealed class BufferedWriter : IDisposable, IAsyncDisposable {
     readonly AsyncMutex _mutex = new AsyncMutex();
     readonly WriterOptions _opt;

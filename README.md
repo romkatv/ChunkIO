@@ -83,7 +83,7 @@ using (var writer = new ChunkWriter(fname)) {
 #### Reading
 
 ```csharp
-// Open a reader, read and print all chunks.
+// Create a reader, read and print all chunks.
 using (var reader = new ChunkReader(fname)) {
   long pos = 0;
   while (true) {
@@ -112,6 +112,62 @@ using (var reader = new ChunkReader(fname)) {
   * Binary search for chunks based on the user-supplied predicate for user data.
 
 *This API is currently private.*
+
+#### Writing
+
+```csharp
+// Create a writer, write two identical two-byte records and flush.
+var opt = new WriterOptions() {
+  // Auto-close chunks when they get big or old enough.
+  CloseChunk = new Triggers { Size = 32 << 10, Age = TimeSpan.FromSeconds(60) },
+  // Flush data to disk (ala fsync) when it gets old enough.
+  FlushToDisk = new Triggers { Age = TimeSpan.FromSeconds(300) },
+};
+async using (var writer = new BufferedWriter(fname, opt)) {
+  // Write two identical records. They may end up in two different chunks if CloseChunk,
+  // FlushToOS or FlushToDisk is triggered after the first record is written. Or if a reader
+  // remotely triggers flush.
+  for (int i = 0; i != 2; ++i) {
+    async using (IOutputChunk chunk = await writer.LockChunk()) {
+      // If LockChunk() gave us a brand new chunk, set user data.
+      if (chunk.IsNew) chunk.UserData = new UserData() { ULong0 = 1, ULong1 = 2 };
+      // Write one record. The chunk cannot be written to disk until we unlock it by
+      // disposing the local `chunk` handle.
+      chunk.Stream.WriteByte(42);
+      chunk.Stream.WriteByte(69);
+    }
+    async writer.FlushAsync(flushToDisk: true);
+  }
+}
+```
+
+#### Reading
+
+```csharp
+// Create a reader, seek to a chunk based on user data, print all records in the following chunks.
+using (var reader = new BufferedReader(fname)) {
+  // If there is a writer writing to our file, tell it to close the current
+  // chunk it's working on and flush its buffers to OS so we can read them.
+  // We now have a guarantee that all chunks with start positions in
+  // [0, len) are final. They cannot change.
+  long len = await reader.FlushRemoteWriterAsync(flushToDisk: false);
+  // Assuming that chunks are partitioned with respect to the predicate
+  // such that falsy chunks cannot follow truthy chunks, find the last
+  // falsy chunk or the very first chunk if none are falsy.
+  InputChunk chunk = await reader.ReadAtPartitionAsync(0, len, (UserData d) => d.ULong1 > 1);
+  while (chunk != null) {
+    Console.WriteLine("User data: {0}, {1}.", chunk.UserData.ULong0, chunk.UserData.ULong1);
+    // Assume two-byte records.
+    Debug.Assert(chunk.Length % 2 == 0);
+    while (chunk.Position != chunk.Length) {
+      Console.WriteLine("Record: [{0}, {1}]", chunk.ReadByte(), chunk.ReadByte());
+    }
+    // Read the first chunk whose start position is in [chunk.EndPosition, len).
+    // A.K.A. the next chunk.
+    chunk = await reader.ReadFirstAsync(chunk.EndPosition, len);
+  }
+}
+```
 
 ### Time Series
 
