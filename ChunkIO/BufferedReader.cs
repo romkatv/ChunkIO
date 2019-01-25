@@ -58,7 +58,7 @@ namespace ChunkIO {
     // Implication: If false chunks cannot follow true chunks, returns the last false chunk if
     // there are any or the very first chunk otherwise.
     //
-    // There are no constraints on the values of positions boundaries. Even long.MinValue and
+    // There are no constraints on the values of position boundaries. Even long.MinValue and
     // long.MaxValue are legal. If from >= to, the result is null.
     public async Task<InputChunk> ReadAtPartitionAsync(long from, long to, Func<UserData, bool> pred) {
       if (pred == null) throw new ArgumentNullException(nameof(pred));
@@ -80,9 +80,11 @@ namespace ChunkIO {
       }
     }
 
-    // Returns the chunk that follows the last chunk returned by ReadAtPartitionAsync() or ReadNextAsync(),
-    // or null if there aren't any.
-    public async Task<InputChunk> ReadNextAsync(long from, long to) =>
+    // Returns the first chunk whose ChunkBeginPosition is in [from, to) or null.
+    //
+    // There are no constraints on the values of position boundaries. Even long.MinValue and
+    // long.MaxValue are legal. If from >= to, the result is null.
+    public async Task<InputChunk> ReadFirstAsync(long from, long to) =>
         await MakeChunk(await _reader.ReadFirstAsync(from, to), Scan.Forward, from, to);
 
     public async Task<long> FlushRemoteWriterAsync(bool flushToDisk) {

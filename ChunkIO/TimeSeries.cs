@@ -280,7 +280,7 @@ namespace ChunkIO {
           _chunk = await _reader._reader.ReadAtPartitionAsync(_from, _to, u => new DateTime(u.Long0) > _after);
         } else {
           _chunk.Dispose();
-          _chunk = await _reader._reader.ReadNextAsync(_next, _to);
+          _chunk = await _reader._reader.ReadFirstAsync(_next, _to);
         }
 
         if (_chunk == null) {
