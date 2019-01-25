@@ -65,6 +65,41 @@ Chunk header bytes:
 
 *This API is currently private.*
 
+#### Writing
+
+```csharp
+// Create a writer, write one chunk and flush.
+using (var writer = new ChunkWriter(fname)) {
+  await writer.WriteAsync(
+      new UserData() { ULong0 = 1, ULong1 = 2 },
+      new byte[] { 42, 69 },
+      offset: 0,
+      count: 2);
+  await writer.FlushAsync(flushToDisk: true);
+}
+```
+
+#### Reading
+
+```csharp
+// Open a reader, read and print all chunks.
+using (var reader = new ChunkReader(fname)) {
+  long pos = 0;
+  while (true) {
+    IChunk chunk = await reader.ReadFirstAsync(pos, long.MaxValue);
+    if (chunk == null) break;
+    Console.WriteLine("User data: {0}, {1}.", chunk.UserData.ULong0, chunk.UserData.ULong1);
+    byte[] content = new byte[chunk.ContentLength];
+    if (await chunk.ReadContentAsync(content, 0)) {
+      Console.WriteLine("Content: [{0}].", string.Join(", ", content));
+    } else {
+      Console.WriteLine("Content: corrupted.");
+    }
+    pos = chunk.BeginPosition + 1;
+  }
+}
+```
+
 ### Buffered IO
 
 `BufferedWriter` and `BufferedReader` provide extra features on top of the core API.
@@ -86,12 +121,16 @@ Chunk header bytes:
   * Chunks are timestamped. These timestamps are encoded in the user data section of chunk headers.
   * Chunks can be looked up by timestamp in `O(log(filesize))`.
 
+See [Example.cs](https://github.com/romkatv/ChunkIO/blob/master/Example/Example.cs) for a usage example.
+
 ### Events
 
 `Event`, `EventEncoder` and `EventDecoder` are optional complimentary classes that can be used with the time series API. They add the following features:
 
   * Each record has a timestamp.
   * Records are encoded with `BinaryWriter` and decoded with `BinaryReader`.
+
+See [Example.cs](https://github.com/romkatv/ChunkIO/blob/master/Example/Example.cs) for a usage example.
 
 ## License
 
