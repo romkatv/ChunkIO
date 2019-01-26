@@ -26,7 +26,7 @@ namespace ChunkIO {
   // Encoder for timestamped records.
   //
   // Methods can be called from arbitrary threads but never concurrently.
-  public interface ITimeSeriesEncoder<T> : IDisposable {
+  public interface ITimeSeriesEncoder<T> {
     // Writes the first value to an empty chunk and returns its timestamp.
     // If the timestamp is not in UTC, it is converted to UTC. This timestamp
     // is used by TimeSeriesReader.ReadAfter() to figure out which chunks
@@ -40,7 +40,7 @@ namespace ChunkIO {
   // Decoder for timestamped records.
   //
   // Methods can be called from arbitrary threads but never concurrently.
-  public interface ITimeSeriesDecoder<T> : IDisposable {
+  public interface ITimeSeriesDecoder<T> {
     // Decodes the first value of the chunk. This value was encoded EncodePrimary() and
     // the timestmap was also produced by it (except that here it is always in UTC).
     void DecodePrimary(Stream strm, DateTime t, out T val);
@@ -92,12 +92,7 @@ namespace ChunkIO {
     // Takes ownership of the encoder. TimeSeriesWriter.Dispose() will dispose it.
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder, WriterOptions opt) {
       Encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
-      try {
-        _writer = new BufferedWriter(fname, opt);
-      } catch {
-        Encoder.Dispose();
-        throw;
-      }
+      _writer = new BufferedWriter(fname, opt);
     }
 
     public TimeSeriesWriter(string fname, ITimeSeriesEncoder<T> encoder)
@@ -150,13 +145,7 @@ namespace ChunkIO {
     // Inheriting from TimeSeriesWriter?
     // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
     protected async Task DisposeAsync(bool disposing) {
-      if (disposing) {
-        try {
-          await _writer.DisposeAsync();
-        } finally {
-          Encoder.Dispose();
-        }
-      }
+      if (disposing) await _writer.DisposeAsync();
     }
 
     // Can block on IO and throw on IO errors. Use DisposeAsync() instead if you can.
@@ -175,9 +164,8 @@ namespace ChunkIO {
     //
     // Takes ownership of the decoder. TimeSeriesReader.Dispose() will dispose it.
     public TimeSeriesReader(string fname, ITimeSeriesDecoder<T> decoder) {
-      if (decoder == null) throw new ArgumentNullException(nameof(decoder));
+      Decoder = decoder ?? throw new ArgumentNullException(nameof(decoder));
       _reader = new BufferedReader(fname);
-      Decoder = decoder;
     }
 
     public IReadOnlyCollection<byte> Id => _reader.Id;
@@ -225,13 +213,7 @@ namespace ChunkIO {
     // Inheriting from TimeSeriesReader?
     // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
     protected virtual void Dispose(bool disposing) {
-      if (disposing) {
-        try {
-          Decoder.Dispose();
-        } finally {
-          _reader.Dispose();
-        }
-      }
+      if (disposing) _reader.Dispose();
     }
 
     class TimeSeriesChunk : IDecodedChunk<T> {

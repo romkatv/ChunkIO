@@ -33,14 +33,6 @@ namespace ChunkIO {
   public abstract class EventEncoder<T> : ITimeSeriesEncoder<Event<T>> {
     BinaryWriter _writer = null;
 
-    public void Dispose() => Dispose(true);
-
-    // Inheriting from EventDecoder?
-    // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
-    protected virtual void Dispose(bool disposing) {
-      if (disposing) _writer?.Dispose();
-    }
-
     public DateTime EncodePrimary(Stream strm, Event<T> e) {
       RefreshWriter(strm);
       Encode(_writer, e.Value, isPrimary: true);
@@ -64,14 +56,6 @@ namespace ChunkIO {
 
   public abstract class EventDecoder<T> : ITimeSeriesDecoder<Event<T>> {
     BinaryReader _reader = null;
-
-    public void Dispose() => Dispose(true);
-
-    // Inheriting from EventDecoder?
-    // See https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose.
-    protected virtual void Dispose(bool disposing) {
-      if (disposing) _reader?.Dispose();
-    }
 
     public void DecodePrimary(Stream strm, DateTime t, out Event<T> val) {
       RefreshReader(strm);
