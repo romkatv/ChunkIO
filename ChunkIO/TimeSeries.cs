@@ -58,13 +58,14 @@ namespace ChunkIO {
   }
 
   public enum TimeSeriesWriteResult {
-    // Record successfully added to the buffer (current chunk). There is no point in trying to
+    // Record(s) successfully added to the buffer (current chunk). There is no point in trying to
     // write the same record. Doing so can result in duplicates.
-    RecordBuffered,
-    // Record dropped on the floor.
-    RecordDropped,
-    // Record dropped on the floor, together with all other records that were
-    // previously added to the buffer (current chunk).
+    RecordsBuffered,
+    // Record(s) dropped on the floor. If you need this record persisted, you need to write it again.
+    RecordsDropped,
+    // Record(s) dropped on the floor, together with all other records that were previously added to
+    // the buffer (current chunk). This happens when ITimeSeriesEncoder throws when attempting to
+    // encode the record(s).
     ChunkDropped,
   }
 
@@ -73,7 +74,7 @@ namespace ChunkIO {
       Result = result;
     }
 
-    // If Result is RecordBuffered, it means there was an IO error when flushing data to disk after
+    // If Result is RecordsBuffered, it means there was an IO error when flushing data to disk after
     // adding the record to the buffer (current chunk). The record is not lost. The next flush will
     // attempt to write it again.
     public TimeSeriesWriteResult Result { get; }
@@ -105,27 +106,34 @@ namespace ChunkIO {
     // the completion of the task it returns.
     public ITimeSeriesEncoder<T> Encoder { get; }
 
+    // Writes all records in order into the same chunk. They can either be appended to the current
+    // chunk or written into a brand new chunk.
+    //
     // Throws on IO errors. Can block on IO.
     //
     // The only exception it throws is TimeSeriesWriteException. You can examine its Result field
-    // to figure out what happened to the record you were trying to write. InnerException is the
+    // to figure out what happened to the record(s) you were trying to write. InnerException is the
     // culprit. It's never null.
-    public async Task Write(T val) {
-      TimeSeriesWriteResult res = TimeSeriesWriteResult.RecordDropped;
+    public async Task WriteBatch(IEnumerable<T> records) {
+      TimeSeriesWriteResult res = TimeSeriesWriteResult.RecordsDropped;
       try {
+        if (records == null) throw new ArgumentNullException(nameof(records));
         IOutputChunk buf = await _writer.LockChunk();
         try {
-          if (buf.IsNew) {
-            buf.UserData = new UserData() { Long0 = Encoder.EncodePrimary(buf.Stream, val).ToUniversalTime().Ticks };
-            // If the block is set up to automatically close after a certain number of bytes is
-            // written, tell it to exclude snapshot bytes from the calculation. This is necessary
-            // to avoid creating a new block on every call to Write() if snapshots happen to
-            // be large.
-            if (buf.CloseAtSize.HasValue) buf.CloseAtSize += buf.Stream.Length;
-          } else {
-            Encoder.EncodeSecondary(buf.Stream, val);
+          IEnumerator<T> e = records.GetEnumerator();
+          if (!e.MoveNext()) {
+            buf.Abandon();
+            return;
           }
-          res = TimeSeriesWriteResult.RecordBuffered;
+          if (buf.IsNew) {
+            buf.UserData = new UserData() {
+              Long0 = Encoder.EncodePrimary(buf.Stream, e.Current).ToUniversalTime().Ticks
+            };
+          } else {
+            Encoder.EncodeSecondary(buf.Stream, e.Current);
+          }
+          while (e.MoveNext()) Encoder.EncodeSecondary(buf.Stream, e.Current);
+          res = TimeSeriesWriteResult.RecordsBuffered;
         } catch {
           res = TimeSeriesWriteResult.ChunkDropped;
           buf.Abandon();
@@ -137,6 +145,8 @@ namespace ChunkIO {
         throw new TimeSeriesWriteException(e, res);
       }
     }
+
+    public Task Write(T val) => WriteBatch(new[] { val });
 
     public Task FlushAsync(bool flushToDisk) => _writer.FlushAsync(flushToDisk);
 

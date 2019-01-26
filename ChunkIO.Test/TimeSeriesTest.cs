@@ -273,10 +273,10 @@ namespace ChunkIO.Test {
               break;
             } catch (TimeSeriesWriteException e) {
               Assert.IsInstanceOfType(e.InnerException, typeof(InjectedWriteException));
-              if (e.Result == TimeSeriesWriteResult.RecordBuffered) {
+              if (e.Result == TimeSeriesWriteResult.RecordsBuffered) {
                 ++written;
               } else {
-                Assert.AreEqual(TimeSeriesWriteResult.RecordDropped, e.Result);
+                Assert.AreEqual(TimeSeriesWriteResult.RecordsDropped, e.Result);
               }
             }
           }
