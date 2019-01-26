@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -32,13 +33,13 @@ namespace ChunkIO.Benchmark {
   }
 
   class EmptyWriter : TimeSeriesWriter<Event<Empty>> {
-    public EmptyWriter(string fname, int chunkSizeBytes) : base(fname, new EmptyEncoder(), Opt(chunkSizeBytes)) { }
+    public EmptyWriter(string fname) : base(fname, new EmptyEncoder(), Opt()) { }
 
-    static WriterOptions Opt(int chunkSizeBytes) => new WriterOptions() {
+    static WriterOptions Opt() => new WriterOptions() {
       // Set all time-based triggers because this is what production code normally does.
       // Use large values that won't actually cause any flushes.
       CloseChunk = new Triggers() {
-        Size = chunkSizeBytes,
+        Size = 32 << 10,
         Age = TimeSpan.FromDays(1),
         AgeRetry = TimeSpan.FromDays(1),
       },
@@ -58,25 +59,44 @@ namespace ChunkIO.Benchmark {
   }
 
   class Benchmark {
-    // Writes Empty records to the specified file for the specified amount of time.
-    // Returns the number of written records. Records have timestamps with consecutive
-    // ticks starting from 1.
-    static async Task<long> WriteMany(string fname, int chunkSizeBytes, double seconds) {
-      using (var writer = new EmptyWriter(fname, chunkSizeBytes)) {
-        long records = 0;
-        DateTime start = DateTime.UtcNow;
-        do {
-          for (int i = 0; i != 256; ++i) {
-            ++records;
-            await writer.Write(new Event<Empty>(new DateTime(records, DateTimeKind.Utc), new Empty()));
-          }
-        } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
+    // Writes individual Empty records to the file. Records have timestamps with consecutive ticks starting from 1.
+    static async Task Write(string fname, long records) {
+      Debug.Assert(records >= 0);
+      using (var writer = new EmptyWriter(fname)) {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        for (long i = 0; i != records; ++i) {
+          await writer.Write(new Event<Empty>(new DateTime(i + 1, DateTimeKind.Utc), new Empty()));
+        }
         await writer.FlushAsync(flushToDisk: false);
-        seconds = (DateTime.UtcNow - start).TotalSeconds;
+        double seconds = stopwatch.Elapsed.TotalSeconds;
         long bytes = new FileInfo(fname).Length;
-        Console.WriteLine("  WriteMany: {0:N0} records, {1:N0} bytes, {2:N0} records/sec, {3:N0} bytes/sec.",
+        Console.WriteLine("  Write(records: {0:N0}): {1:N0} bytes, {2:N0} records/sec, {3:N0} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
-        return records;
+      }
+    }
+
+    // Writes batches of Empty records to the file. Records have timestamps with consecutive ticks starting from 1.
+    static async Task WriteBatch(string fname, long batches, long recsPerBatch) {
+      Debug.Assert(batches >= 0);
+      Debug.Assert(recsPerBatch > 0);
+      using (var writer = new EmptyWriter(fname)) {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        for (long i = 0; i != batches; ++i) {
+          await writer.WriteBatch(Batch());
+          IEnumerable<Event<Empty>> Batch() {
+            for (long j = 0; j != recsPerBatch; ++j) {
+              yield return new Event<Empty>(new DateTime(i * recsPerBatch + j + 1, DateTimeKind.Utc), new Empty());
+            }
+          }
+        }
+        await writer.FlushAsync(flushToDisk: false);
+        double seconds = stopwatch.Elapsed.TotalSeconds;
+        long bytes = new FileInfo(fname).Length;
+        long records = batches * recsPerBatch;
+        Console.WriteLine(
+            "  WriteBatch(batches: {0:N0}, recsPerBatch: {1:N0}): " +
+                "{2:N0} records, {3:N0} bytes, {4:N0} records/sec, {5:N0} bytes/sec.",
+            batches, recsPerBatch, records, bytes, records / seconds, bytes / seconds);
       }
     }
 
@@ -84,12 +104,12 @@ namespace ChunkIO.Benchmark {
     static async Task<long> ReadAll(string fname) {
       using (var reader = new EmptyReader(fname)) {
         long records = 0;
-        DateTime start = DateTime.UtcNow;
+        Stopwatch stopwatch = Stopwatch.StartNew();
         await reader.ReadAfter(DateTime.MinValue).ForEachAsync((IEnumerable<Event<Empty>> buf) => {
           records += buf.Count();
           return Task.CompletedTask;
         });
-        double seconds = (DateTime.UtcNow - start).TotalSeconds;
+        double seconds = stopwatch.Elapsed.TotalSeconds;
         long bytes = new FileInfo(fname).Length;
         Console.WriteLine("  ReadAll: {0:N0} records, {1:N0} bytes, {2:N0} records/sec, {3:N0} bytes/sec.",
                           records, bytes, records / seconds, bytes / seconds);
@@ -103,57 +123,59 @@ namespace ChunkIO.Benchmark {
       if (maxTicks >= int.MaxValue) throw new Exception("Sorry, not implemented");
         var rng = new Random();
         long seeks = 0;
-        DateTime start = DateTime.UtcNow;
-        do {
+      Stopwatch stopwatch = Stopwatch.StartNew();
+      do {
           ++seeks;
           var t = new DateTime(rng.Next((int)maxTicks + 1), DateTimeKind.Utc);
+          // Create a new reader for every seek to avoid the possibility of caching in the reader.
           using (var reader = new EmptyReader(fname)) {
+            // Note that this not only seeks but also reads and decompresses the content of the
+            // first chunk.
             await reader.ReadAfter(t).GetAsyncEnumerator().MoveNextAsync(CancellationToken.None);
           }
-        } while (DateTime.UtcNow < start + TimeSpan.FromSeconds(seconds));
-        seconds = (DateTime.UtcNow - start).TotalSeconds;
+        } while (stopwatch.Elapsed < TimeSpan.FromSeconds(seconds));
+        seconds = stopwatch.Elapsed.TotalSeconds;
         Console.WriteLine("  SeekMany: {0:N0} seeks, {1:N1} seeks/sec.", seeks, seeks / seconds);
+    }
+
+    static async Task WithFile(Func<string, Task> action) {
+      string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+      try {
+        await action.Invoke(fname);
+      } finally {
+        if (File.Exists(fname)) File.Delete(fname);
+      }
     }
 
     // Sample run on AWS c4.xlarge, Windows Server 2016, .NET Framework 4.7.2:
     //
-    //   ===[ Chunk Size 0KiB ]===
-    //     WriteMany: 245,760 records, 9,832,816 bytes, 8,186 records/sec, 327,501 bytes/sec.
-    //     ReadAll: 245,760 records, 9,832,816 bytes, 19,562 records/sec, 782,657 bytes/sec.
-    //     SeekMany: 71 seeks, 7.1 seeks/sec.
-    //   ===[ Chunk Size 32KiB ]===
-    //     WriteMany: 18,106,368 records, 27,683,618 bytes, 603,490 records/sec, 922,702 bytes/sec.
-    //     ReadAll: 18,106,368 records, 27,683,618 bytes, 6,986,829 records/sec, 10,682,468 bytes/sec.
-    //     SeekMany: 2,152 seeks, 215.2 seeks/sec.
-    //   ===[ Chunk Size 64KiB ]===
-    //     WriteMany: 18,492,928 records, 28,127,727 bytes, 616,395 records/sec, 937,536 bytes/sec.
-    //     ReadAll: 18,492,928 records, 28,127,727 bytes, 7,998,825 records/sec, 12,166,205 bytes/sec.
-    //     SeekMany: 2,592 seeks, 259.1 seeks/sec.
-    //   ===[ Chunk Size 128KiB ]===
-    //     WriteMany: 18,695,424 records, 28,370,088 bytes, 623,020 records/sec, 945,425 bytes/sec.
-    //     ReadAll: 18,695,424 records, 28,370,088 bytes, 8,748,502 records/sec, 13,275,750 bytes/sec.
-    //     SeekMany: 2,479 seeks, 247.8 seeks/sec.
-    //   ===[ Chunk Size 4096KiB ]===
-    //     WriteMany: 18,874,624 records, 28,581,520 bytes, 622,642 records/sec, 942,856 bytes/sec.
-    //     ReadAll: 18,874,624 records, 28,581,520 bytes, 8,909,494 records/sec, 13,491,494 bytes/sec.
-    //     SeekMany: 349 seeks, 34.8 seeks/sec.
+    //   Write(records: 8,390,656): 12,828,714 bytes, 612,319 records/sec, 936,192 bytes/sec.
+    //   WriteBatch(batches: 34,816, recsPerBatch: 241): 8,390,656 records, 12,828,714 bytes, 864,088 records/sec, 1,321,128 bytes/sec.
+    //   ReadAll: 8,390,656 records, 12,828,714 bytes, 7,258,004 records/sec, 11,096,971 bytes/sec.
+    //   SeekMany: 1,392 seeks, 278.3 seeks/sec.
     static async Task RunBenchmarks() {
-      foreach (int chunkSizeKiB in new[] { 0, 32, 64, 128, 4 << 10 }) {
-        Console.WriteLine("===[ Chunk Size {0}KiB ]===", chunkSizeKiB);
-        string fname = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        try {
-          long written = await WriteMany(fname, chunkSizeBytes: chunkSizeKiB << 10, seconds: 30);
+      await Run("Warmup", chunks: 16, seconds: 0.1);
+      await Run("Benchmark", chunks: 2 << 10, seconds: 5);
+
+      async Task Run(string label, long chunks, double seconds) {
+        Console.WriteLine("{0}:", label);
+        // The number 241 is chosen to ensure that WriteBatch() and Write() generate identical files
+        // with the same number of chunks. Our chunks are auto-closed when they are at least 32KiB, which
+        // means we can fit (32 << 10) / 8 + 1 = 4097 records in a chunk (+1 because the first record is
+        // encoded in user data). 4097 is 17 * 241.
+        const long RecsPerBatch = 241;
+        const long BatchesPerChunk = 17;
+        long batches = chunks * BatchesPerChunk;
+        long records = batches * RecsPerBatch;
+        await WithFile((string fname) => Write(fname, records));
+        await WithFile(async (string fname) => {
+          await WriteBatch(fname, batches, RecsPerBatch);
           long read = await ReadAll(fname);
-          if (written != read) throw new Exception($"Written {written} but read back {read}");
-          // Note that performance of SeekMany() depends on the file size. The latter, in turn, depends
-          // on the performance of WriteMany(). If you want to compare the performance of two
-          // implementations of seek, you need to bechmark both against the same file.
-          await SeekMany(fname, written, seconds: 10);
-        } finally {
-          if (File.Exists(fname)) File.Delete(fname);
-        }
+          if (read != records) throw new Exception($"Written {records} but read back {read}");
+          await SeekMany(fname, records, seconds);
+        });
       }
-    }
+    } 
 
     static int Main(string[] args) {
       try {
