@@ -183,6 +183,7 @@ namespace ChunkIO {
     readonly Timer _closeChunk;
     readonly Timer _flushToOS;
     readonly Timer _flushToDisk;
+    readonly MemoryStream _strm = new MemoryStream();
     Chunk _buf = null;
     long? _bufOS = null;
     long? _bufDisk = null;
@@ -255,6 +256,7 @@ namespace ChunkIO {
           try {
             await DoCloseChunk(flushToDisk: _opt.DisposeFlushToDisk);
           } finally {
+            _strm.Dispose();
             _closeChunk.Stop();
             _flushToOS.Stop();
             _flushToDisk.Stop();
@@ -278,7 +280,6 @@ namespace ChunkIO {
           _bufDisk = (_bufDisk ?? 0) + _buf.Stream.Length;
         }
         _closeChunk.Stop();
-        _buf.Dispose();
         _buf = null;
       }
 
@@ -359,19 +360,20 @@ namespace ChunkIO {
       }
     }
 
-    sealed class Chunk : IDisposable {
+    sealed class Chunk {
       readonly BufferedWriter _writer;
 
       public Chunk(BufferedWriter writer) {
         _writer = writer;
         CloseAtSize = writer._opt.CloseChunk?.Size;
         CloseAtAge = writer._opt.CloseChunk?.Age;
+        Stream.SetLength(0);
       }
 
       public event Action OnClose;
 
       public ArraySegment<byte>? CompressedContent { get; internal set; }
-      public MemoryStream Stream { get; } = new MemoryStream(4 << 10);
+      public MemoryStream Stream => _writer._strm;
       public DateTime CreatedAt { get; } = DateTime.UtcNow;
       public UserData UserData { get; set; }
       public object UserState { get; set; }
@@ -380,7 +382,6 @@ namespace ChunkIO {
       public bool IsAbandoned { get; internal set; }
 
       public void Abandon() { IsAbandoned = true; }
-      public void Dispose() => Stream.Dispose();
       public Task Unlock() => _writer.Unlock();
 
       public bool Close(CompressionLevel lvl) {
