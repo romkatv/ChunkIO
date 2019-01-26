@@ -104,7 +104,7 @@ namespace ChunkIO.Test {
 
           chunk = await reader.ReadFirstAsync(chunk.EndPosition, long.MaxValue);
           Assert.IsNotNull(chunk);
-          Assert.AreEqual(MaxContentLength, content.Length);
+          Assert.AreEqual(MaxContentLength, chunk.ContentLength);
           content = new byte[chunk.ContentLength];
           Assert.IsTrue(await chunk.ReadContentAsync(content, 0));
           foreach (byte x in content) {
