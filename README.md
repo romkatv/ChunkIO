@@ -136,8 +136,8 @@ async using (var writer = new BufferedWriter(fname, opt)) {
       chunk.Stream.WriteByte(42);
       chunk.Stream.WriteByte(69);
     }
-    async writer.FlushAsync(flushToDisk: true);
   }
+  async writer.FlushAsync(flushToDisk: true);
 }
 ```
 
