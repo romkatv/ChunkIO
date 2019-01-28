@@ -312,4 +312,41 @@ namespace ChunkIO {
           new ChunkEnumerator(_reader, _after, _from, _to);
     }
   }
+
+  // Transcoder for files written with TimeSeriesWriter.
+  public static class TimeSeriesTranscoder {
+    // Reads all chunks from the ChunkIO file named `input`, decodes their content with `decoder`,
+    // transforms records with `transform`, encodes them with `encoder` and appends to the ChunkIO
+    // file named `output`.
+    //
+    // The output ChunkIO file is written with default WriterOptions. Some input chunks may get
+    // merged but no chunks get split.
+    public static async Task Transcode<T, U>(
+        string input,
+        string output,
+        ITimeSeriesDecoder<T> decoder,
+        ITimeSeriesEncoder<U> encoder,
+        Func<T, U> transform) {
+      using (var reader = new TimeSeriesReader<T>(input, decoder)) {
+        var writer = new TimeSeriesWriter<U>(output, encoder);
+        try {
+          long len = await reader.FlushRemoteWriterAsync(flushToDisk: false);
+          await reader.ReadAfter(DateTime.MinValue, 0, len).ForEachAsync(async (IDecodedChunk<T> c) => {
+            await writer.WriteBatch(c.Select(transform));
+          });
+        } finally {
+          await writer.DisposeAsync();
+        }
+      }
+    }
+
+    public static Task Transcode<T>(
+        string input,
+        string output,
+        ITimeSeriesDecoder<T> decoder,
+        ITimeSeriesEncoder<T> encoder,
+        Func<T, T> transform = null) {
+      return Transcode<T, T>(input, output, decoder, encoder, transform ?? (x => x));
+    }
+  }
 }
