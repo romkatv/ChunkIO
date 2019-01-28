@@ -94,8 +94,7 @@ namespace ChunkIO {
       // Surprisingly enough, Task.Run(delegate { }, c) don't have this problem even though one
       // would expect it to be equivalent to our implementation of Foo().
       //
-      // To work around this problem we could either call next.Start() under the lock above,
-      // or catch and ignore InvalidOperationException. We go with the latter.
+      // To work around this problem, we catch and ignore InvalidOperationException.
       try {
         next.Start();
       } catch (InvalidOperationException) {

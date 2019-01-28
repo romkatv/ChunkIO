@@ -54,7 +54,13 @@ namespace ChunkIO {
       void Update(Action update) {
         lock (monitor) {
           update.Invoke();
-          if (wake.Status == TaskStatus.Created) wake.Start();
+          if (wake.Status == TaskStatus.Created) {
+            try {
+              wake.Start();
+            } catch (InvalidOperationException) {
+              Debug.Assert(wake.IsCanceled);
+            }
+          }
         }
       }
 
