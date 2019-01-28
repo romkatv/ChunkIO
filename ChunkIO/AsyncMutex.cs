@@ -59,7 +59,48 @@ namespace ChunkIO {
         next = _waiters.First.Value;
         _waiters.RemoveFirst();
       }
-      next.Start();
+      // Task.Start() has weird semantics when it comes to the handling of concurrent cancellations.
+      // Consider the following function:
+      //
+      //   void Foo(CancellationToken c) {
+      //     Task t = new Task(delegate { }, c);
+      //     t.Start();
+      //   }
+      //
+      // Here `t.Start()` may or may not throw InvalidOperationException. Its logic is roughly
+      // as follows:
+      //
+      //   lock (t._monitor) {
+      //     if (t._cancelled || t._started) throw InvalidOperationException();
+      //   }
+      //
+      //   lock (t._monitor) {
+      //     if (t._cancelled || t._started) return;
+      //     t._started = true;
+      //   }
+      //
+      //   ActuallyRun();
+      //
+      // A sane person would write it like this instead:
+      //
+      //   lock (t._monitor) {
+      //     if (t._started) throw InvalidOperationException();
+      //     if (t._cancelled) return;
+      //     t._started = true;
+      //   }
+      //
+      //   ActuallyRun();
+      //
+      // Surprisingly enough, Task.Run(delegate { }, c) don't have this problem even though one
+      // would expect it to be equivalent to our implementation of Foo().
+      //
+      // To work around this problem we could either call next.Start() under the lock above,
+      // or catch and ignore InvalidOperationException. We go with the latter.
+      try {
+        next.Start();
+      } catch (InvalidOperationException) {
+        Debug.Assert(next.IsCanceled);
+      }
     }
 
     public bool IsLocked {

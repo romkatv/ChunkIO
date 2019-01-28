@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -44,6 +45,35 @@ namespace ChunkIO.Test {
           counter = next;
           mutex.Unlock();
         }
+      }
+    }
+
+    [TestMethod]
+    public void CancelTest() {
+      const int N = 64;
+      long counter = 0;
+      var mutex = new AsyncMutex();
+      Task[] tasks = Enumerable.Range(0, N).Select(_ => Inc()).ToArray();
+      Task.WaitAll(tasks);
+      Assert.AreEqual(N, counter);
+
+      async Task Inc() {
+        while (true) {
+          using (var cancel = new CancellationTokenSource()) {
+            Task t = mutex.LockAsync(cancel.Token);
+            await Task.Yield();
+            cancel.Cancel();
+            try {
+              await t;
+              break;
+            } catch (TaskCanceledException) {
+            }
+          }
+        }
+        long next = counter + 1;
+        await Task.Yield();
+        counter = next;
+        mutex.Unlock();
       }
     }
   }
