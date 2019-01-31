@@ -177,12 +177,6 @@ namespace ChunkIO.Benchmark {
       }
     }
 
-    class Counter {
-      public long Value = 0;
-
-      public static void Increment(Counter c) { ++c.Value; }
-    }
-
     static int Main(string[] args) {
       try {
         RunBenchmarks().Wait();
