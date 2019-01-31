@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,14 +33,98 @@ namespace ChunkIO {
   //     await t2;
   //     Debug.Assert(t1.IsCompleted);
   //   }
-  class AsyncMutex {
+  public class AsyncMutex {
+    static readonly Action DoNothing = delegate { };
+
+    readonly ActionChain<State, bool> _chain = new ActionChain<State, bool>();
     readonly object _monitor = new object();
     readonly LinkedList<Task> _waiters = new LinkedList<Task>();
     bool _locked = false;
 
     public Task LockAsync() => LockAsync(CancellationToken.None);
 
+    struct State {
+      [MethodImpl(MethodImplOptions.AggressiveInlining)]
+      public State(AsyncMutex mutex, object extra) {
+        Mutex = mutex;
+        Extra = extra;
+      }
+      public AsyncMutex Mutex { get; }
+      public object Extra { get; }
+    }
+
+    class Extra2 {
+      [MethodImpl(MethodImplOptions.AggressiveInlining)]
+      public Extra2(CancellationToken cancel) {
+        Cancel = cancel;
+        Task = new Task(End, this);
+      }
+
+      public Task Task { get; }
+      public bool Cancelled { get; set; }
+      public CancellationToken Cancel { get; }
+      public LinkedListNode<Task> Node { get; set; }
+      public AsyncMutex Mutex { get; set; }
+
+      static readonly Action<object> End = (object extra) => {
+        if (((Extra2)extra).Cancelled) throw new TaskCanceledException(nameof(LockAsync));
+      };
+    }
+
+    static readonly Func<bool, State, bool> Lock1 = (bool sync, State state) => {
+      if (!sync || state.Mutex._locked) return false;
+      Debug.Assert(state.Mutex._waiters.Count == 0);
+      state.Mutex._locked = true;
+      return true;
+    };
+
+    static readonly Func<bool, State, bool> Lock2 = (bool sync, State state) => {
+      var extra = (Extra2)state.Extra;
+      if (!state.Mutex._locked) {
+        Debug.Assert(state.Mutex._waiters.Count == 0);
+        state.Mutex._locked = true;
+        extra.Task.Start();
+      } else {
+        extra.Mutex = state.Mutex;
+        extra.Node = state.Mutex._waiters.AddLast(new Task(DoNothing, extra.Cancel));
+        extra.Node.Value.ContinueWith(Lock3, extra);
+      }
+      return false;
+    };
+
+    static readonly Action<Task, object> Lock3 = (Task t, object extra) => {
+      var e = (Extra2)extra;
+      e.Mutex._chain.Add(Lock4, new State(e.Mutex, extra), out bool ret);
+    };
+
+    static readonly Func<bool, State, bool> Lock4 = (bool sync, State state) => {
+      var extra = (Extra2)state.Extra;
+      if (extra.Node.List == null) {
+        Debug.Assert(state.Mutex._locked);
+      } else {
+        Debug.Assert(extra.Node.Value.IsCanceled);
+        state.Mutex._waiters.Remove(extra.Node);
+        extra.Cancelled = true;
+      }
+      extra.Task.Start();
+      return false;
+    };
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task LockAsync(CancellationToken cancel) {
+      {
+        var state = new State(this, null);
+        _chain.Add(Lock1, state, out bool ret);
+        if (ret) return Task.CompletedTask;
+      }
+
+      {
+        var extra = new Extra2(cancel);
+        var state = new State(this, extra);
+        _chain.Add(Lock2, state, out bool ret);
+        return extra.Task;
+      }
+      
       LinkedListNode<Task> node;
       lock (_monitor) {
         if (!_locked) {
@@ -62,7 +147,63 @@ namespace ChunkIO {
       });
     }
 
+    static readonly Func<bool, State, bool> Unlock1 = (bool sync, State state) => {
+      Debug.Assert(state.Mutex._locked);
+      if (state.Mutex._waiters.Count == 0) {
+        state.Mutex._locked = false;
+      } else {
+        Task next = state.Mutex._waiters.First.Value;
+        state.Mutex._waiters.RemoveFirst();
+        // Task.Start() has weird semantics when it comes to the handling of concurrent cancellations.
+        // Consider the following function:
+        //
+        //   void Foo(CancellationToken c) {
+        //     Task t = new Task(delegate { }, c);
+        //     t.Start();
+        //   }
+        //
+        // Here `t.Start()` may or may not throw InvalidOperationException. Its logic is roughly
+        // as follows:
+        //
+        //   lock (t._monitor) {
+        //     if (t._cancelled || t._started) throw InvalidOperationException();
+        //   }
+        //
+        //   lock (t._monitor) {
+        //     if (t._cancelled || t._started) return;
+        //     t._started = true;
+        //   }
+        //
+        //   ActuallyRun();
+        //
+        // A sane person would write it like this instead:
+        //
+        //   lock (t._monitor) {
+        //     if (t._started) throw InvalidOperationException();
+        //     if (t._cancelled) return;
+        //     t._started = true;
+        //   }
+        //
+        //   ActuallyRun();
+        //
+        // Surprisingly enough, Task.Run(delegate { }, c) don't have this problem even though one
+        // would expect it to be equivalent to our implementation of Foo().
+        //
+        // To work around this problem, we catch and ignore InvalidOperationException.
+        try {
+          next.Start();
+        } catch (InvalidOperationException) {
+          Debug.Assert(next.IsCanceled);
+        }
+      }
+      return false;
+    };
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Unlock() {
+      _chain.Add(Unlock1, new State(this, null), out bool ret);
+      return;
+
       Task next;
       lock (_monitor) {
         Debug.Assert(_locked);

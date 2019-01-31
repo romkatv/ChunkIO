@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -74,6 +75,31 @@ namespace ChunkIO.Test {
         await Task.Yield();
         counter = next;
         mutex.Unlock();
+      }
+    }
+
+    [TestMethod]
+    public void Benchmark0() {
+      Benchmark(1).Wait();
+    }
+
+    static async Task Benchmark(int parallelism) {
+      long counter = 0;
+      var mutex = new AsyncMutex();
+      TimeSpan duration = TimeSpan.FromSeconds(5);
+      Stopwatch stopwatch = Stopwatch.StartNew();
+      await Task.WhenAll(Enumerable.Range(0, parallelism).Select(_ => Inc()));
+      double seconds = stopwatch.Elapsed.TotalSeconds;
+      Console.Write("Benchmark(parallelism: {0}): {1:N0} calls/sec.", parallelism, counter / seconds);
+
+      async Task Inc() {
+        while (stopwatch.Elapsed < duration) {
+          for (int i = 0; i != 256; ++i) {
+            await mutex.LockAsync();
+            ++counter;
+            mutex.Unlock();
+          }
+        }
       }
     }
   }

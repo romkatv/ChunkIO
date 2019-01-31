@@ -175,11 +175,76 @@ namespace ChunkIO.Benchmark {
           await SeekMany(fname, records, seconds);
         });
       }
-    } 
+    }
+
+    class Counter {
+      public long Value = 0;
+
+      public static void Increment(Counter c) { ++c.Value; }
+    }
+
+    static void ActionChainBench(int parallelism) {
+      var counter = new Counter();
+      var mutex = new AsyncMutex();
+      var ac = new ActionChain<Counter, int>();
+      TimeSpan duration = TimeSpan.FromSeconds(1);
+      Stopwatch stopwatch = Stopwatch.StartNew();
+      // await Task.WhenAll(Enumerable.Range(0, parallelism).Select(_ => Inc()));
+      Inc();
+      double seconds = stopwatch.Elapsed.TotalSeconds;
+      Console.WriteLine("Benchmark(parallelism: {0}): {1:N1} ns/call.",
+                        parallelism, 1e9 * seconds / counter.Value);
+
+      void Inc() {
+        // await Task.Yield();
+        Func<bool, Counter, int> inc = (sync, c) => {
+          ++c.Value;
+          return 0;
+        };
+        while (stopwatch.Elapsed < duration) {
+          // var done = new Task(delegate { });
+          for (int i = 0; i != 256; ++i) {
+            // lock (ac) f();
+            ac.Add(inc, counter, out int ret);
+            // await mutex.LockAsync();
+            // ++counter;
+            // mutex.Unlock();
+          }
+          // ac.Add(() => done.Start());
+          // await done;
+        }
+      }
+    }
+
+    static async Task AsyncMutexBench(int parallelism) {
+      long counter = 0;
+      var mutex = new AsyncMutex();
+      TimeSpan duration = TimeSpan.FromSeconds(1);
+      Stopwatch stopwatch = Stopwatch.StartNew();
+      await Task.WhenAll(Enumerable.Range(0, parallelism).Select(_ => Inc()));
+      double seconds = stopwatch.Elapsed.TotalSeconds;
+      Console.WriteLine("Benchmark(parallelism: {0}): {1:N1} ns/call.", parallelism, 1e9 * seconds / counter);
+
+      async Task Inc() {
+        await Task.Yield();
+        while (stopwatch.Elapsed < duration) {
+          for (int i = 0; i != 256; ++i) {
+            await mutex.LockAsync();
+            ++counter;
+            mutex.Unlock();
+          }
+        }
+      }
+    }
 
     static int Main(string[] args) {
       try {
-        RunBenchmarks().Wait();
+        // RunBenchmarks().Wait();
+        // LockUnlock(8).Wait();
+        // return 0;
+        foreach (int parallelism in new[] { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024 }) {
+          AsyncMutexBench(parallelism).Wait();
+        }
       } catch (Exception e) {
         Console.Error.WriteLine("Error: {0}", e);
         return 1;
