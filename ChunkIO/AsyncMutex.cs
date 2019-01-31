@@ -125,32 +125,4 @@ namespace ChunkIO {
       public CancellationTokenRegistration CancelReg { get; set; }
     }
   }
-
-  static class AsyncMutexExtensions {
-    public static Task WithLock(this AsyncMutex mutex, Func<Task> action) =>
-        WithLock(mutex, CancellationToken.None, action);
-
-    public static Task<T> WithLock<T>(this AsyncMutex mutex, Func<Task<T>> action) =>
-        WithLock(mutex, CancellationToken.None, action);
-
-    public static async Task WithLock(this AsyncMutex mutex, CancellationToken cancel, Func<Task> action) {
-      Debug.Assert(mutex != null && action != null);
-      await mutex.LockAsync(cancel);
-      try {
-        await action.Invoke();
-      } finally {
-        mutex.Unlock(runNextSynchronously: false);
-      }
-    }
-
-    public static async Task<T> WithLock<T>(this AsyncMutex mutex, CancellationToken cancel, Func<Task<T>> action) {
-      Debug.Assert(mutex != null && action != null);
-      await mutex.LockAsync(cancel);
-      try {
-        return await action.Invoke();
-      } finally {
-        mutex.Unlock(runNextSynchronously: false);
-      }
-    }
-  }
 }

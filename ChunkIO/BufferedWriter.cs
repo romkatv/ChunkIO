@@ -233,14 +233,14 @@ namespace ChunkIO {
 
     // If there is current chunk, waits until it gets unlocked and writes its content to
     // the underlying ChunkWriter. Otherwise does nothing.
-    public Task CloseChunkAsync() => _mutex.WithLock(() => {
+    public Task CloseChunkAsync() => WithLock(() => {
       CheckDispose();
       return DoCloseChunk(flushToDisk: null);
     });
 
     // 1. If there is current chunk, waits until it gets unlocked and closes it.
     // 2. Flushes the underlying ChunkWriter.
-    public Task<long> FlushAsync(bool flushToDisk) => _mutex.WithLock(async () => {
+    public Task<long> FlushAsync(bool flushToDisk) => WithLock(async () => {
       CheckDispose();
       await DoCloseChunk(flushToDisk);
       return _writer.Length;
@@ -250,7 +250,7 @@ namespace ChunkIO {
       try {
         if (_listener != null) await _listener.DisposeAsync();
       } finally {
-        await _mutex.WithLock(async () => {
+        await WithLock(async () => {
           if (_disposed) return;
           _disposed = true;
           try {
@@ -317,6 +317,26 @@ namespace ChunkIO {
     void CheckDispose() {
       Debug.Assert(_mutex.IsLocked);
       if (_disposed) throw new ObjectDisposedException(nameof(BufferedWriter));
+    }
+
+    async Task WithLock(Func<Task> action) {
+      Debug.Assert(action != null);
+      await _mutex.LockAsync();
+      try {
+        await action.Invoke();
+      } finally {
+        _mutex.Unlock(runNextSynchronously: false);
+      }
+    }
+
+    async Task<T> WithLock<T>(Func<Task<T>> action) {
+      Debug.Assert(action != null);
+      await _mutex.LockAsync();
+      try {
+        return await action.Invoke();
+      } finally {
+        _mutex.Unlock(runNextSynchronously: false);
+      }
     }
 
     sealed class LockedChunk : IOutputChunk {
