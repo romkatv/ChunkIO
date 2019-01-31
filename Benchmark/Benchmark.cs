@@ -149,10 +149,10 @@ namespace ChunkIO.Benchmark {
 
     // Sample run on AWS c4.xlarge, Windows Server 2016, .NET Framework 4.7.2:
     //
-    //   Write(records: 8,390,656): 12,828,714 bytes, 612,319 records/sec, 936,192 bytes/sec.
-    //   WriteBatch(batches: 34,816, recsPerBatch: 241): 8,390,656 records, 12,828,714 bytes, 864,088 records/sec, 1,321,128 bytes/sec.
-    //   ReadAll: 8,390,656 records, 12,828,714 bytes, 7,258,004 records/sec, 11,096,971 bytes/sec.
-    //   SeekMany: 1,392 seeks, 278.3 seeks/sec.
+    //   Write(records: 8,390,656): 12,828,714 bytes, 882,713 records/sec, 1,349,606 bytes/sec.
+    //   WriteBatch(batches: 34,816, recsPerBatch: 241): 8,390,656 records, 12,828,714 bytes, 1,332,574 records/sec, 2,037,411 bytes/sec.
+    //   ReadAll: 8,390,656 records, 12,828,714 bytes, 8,514,072 records/sec, 13,017,408 bytes/sec.
+    //   SeekMany: 1,551 seeks, 310.0 seeks/sec.
     static async Task RunBenchmarks() {
       await Run("Warmup", chunks: 128, seconds: 1);
       await Run("Benchmark", chunks: 2 << 10, seconds: 5);
