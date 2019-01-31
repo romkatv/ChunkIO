@@ -226,7 +226,7 @@ namespace ChunkIO {
         _closeChunk.ScheduleAt(_buf.CreatedAt + _buf.CloseAtAge);
         return new LockedChunk(_buf, isNew: true);
       } catch {
-        _mutex.Unlock();
+        _mutex.Unlock(runNextSynchronously: false);
         throw;
       }
     }
@@ -310,7 +310,7 @@ namespace ChunkIO {
           await DoCloseChunk(flushToDisk: null);
         }
       } finally {
-        _mutex.Unlock();
+        _mutex.Unlock(runNextSynchronously: false);
       }
     }
 
@@ -440,6 +440,7 @@ namespace ChunkIO {
     }
 
     async Task Run(DateTime t, CancellationTokenSource cancel) {
+      await Task.Yield();
       try {
         await Delay(t, cancel.Token);
         await _mutex.LockAsync(cancel.Token);
@@ -459,7 +460,7 @@ namespace ChunkIO {
           ScheduleAt(retry);
         }
       } finally {
-        _mutex.Unlock();
+        _mutex.Unlock(runNextSynchronously: true);
       }
     }
 

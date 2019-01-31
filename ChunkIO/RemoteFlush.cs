@@ -69,7 +69,7 @@ namespace ChunkIO {
           } catch (IOException) {
             continue;
           } finally {
-            s_connect.Unlock();
+            s_connect.Unlock(runNextSynchronously: false);
           }
           var buf = new byte[UInt64LE.Size];
           if (flushToDisk) buf[0] = 1;

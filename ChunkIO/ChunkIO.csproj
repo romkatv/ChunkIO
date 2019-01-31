@@ -79,7 +79,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ActionChain.cs" />
     <Compile Include="AsyncDisposable.cs" />
     <Compile Include="AsyncEnumerable.cs" />
     <Compile Include="AsyncMutex.cs" />
@@ -88,6 +87,7 @@
     <Compile Include="FileId.cs" />
     <Compile Include="Format.cs" />
     <Compile Include="Compression.cs" />
+    <Compile Include="IntrusiveList.cs" />
     <Compile Include="Pipe.cs" />
     <Compile Include="SipHash.cs" />
     <Compile Include="Event.cs" />
