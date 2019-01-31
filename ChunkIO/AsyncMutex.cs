@@ -41,6 +41,7 @@ namespace ChunkIO {
     public Task LockAsync() => LockAsync(CancellationToken.None);
 
     public Task LockAsync(CancellationToken cancel) {
+      if (cancel.IsCancellationRequested) return Task.FromCanceled(cancel);
       Monitor.Enter(_monitor);
       if (!_locked) {
         Debug.Assert(_waiters.First == null);
@@ -75,6 +76,16 @@ namespace ChunkIO {
       }
     }
 
+    Task LockSlow(CancellationToken cancel) {
+      var waiter = new Waiter() { Mutex = this };
+      Task res = waiter.Task = new Task(EndLock, waiter);
+      _waiters.AddLast(waiter);
+      // Note that CancelLock can be called synchronously here.
+      waiter.CancelReg = cancel.Register(CancelLock, waiter);
+      Monitor.Exit(_monitor);
+      return res;
+    }
+
     void UnlockSlow(bool runNextSynchronously) {
       Waiter waiter = _waiters.First;
       Task task = waiter.Task;
@@ -87,16 +98,6 @@ namespace ChunkIO {
       } else {
         task.Start();
       }
-    }
-
-    Task LockSlow(CancellationToken cancel) {
-      if (cancel.IsCancellationRequested) return Task.FromCanceled(cancel);
-      var waiter = new Waiter() { Mutex = this };
-      Task res = waiter.Task = new Task(EndLock, waiter);
-      _waiters.AddLast(waiter);
-      waiter.CancelReg = cancel.Register(CancelLock, waiter);
-      Monitor.Exit(_monitor);
-      return res;
     }
 
     static readonly Action<object> EndLock = (object state) => {
