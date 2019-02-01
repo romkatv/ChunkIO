@@ -116,6 +116,8 @@ namespace ChunkIO {
         m._waiters.Remove(waiter);
       }
       waiter.CancelReg.Dispose();
+      // If _monitor is locked here, task cannot have continuations, so RunSynchronously()
+      // is safe to call.
       task.RunSynchronously();
     };
 
