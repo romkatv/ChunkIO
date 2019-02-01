@@ -126,9 +126,7 @@ namespace ChunkIO {
             return;
           }
           if (buf.IsNew) {
-            buf.UserData = new UserData() {
-              Long0 = Encoder.EncodePrimary(buf.Stream, e.Current).ToUniversalTime().Ticks
-            };
+            buf.UserData.Long0 = Encoder.EncodePrimary(buf.Stream, e.Current).ToUniversalTime().Ticks;
           } else {
             Encoder.EncodeSecondary(buf.Stream, e.Current);
           }

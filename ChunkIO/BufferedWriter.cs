@@ -50,7 +50,7 @@ namespace ChunkIO {
     DateTime CreatedAt { get; }
     // User data of the chunk. Passed through to the underlying ChunkWriter. Set to default(UserData)
     // in new chunks.
-    UserData UserData { get; set; }
+    ref UserData UserData { get; }
     // Placeholder for anything the user might need to store alongside the chunk. Set to null in
     // new chunks.
     object UserState { get; set; }
@@ -358,10 +358,7 @@ namespace ChunkIO {
       public DateTime CreatedAt => _buf.CreatedAt;
       public TimeSpan? CloseAtAge => _buf.CloseAtAge;
 
-      public UserData UserData {
-        get => _buf.UserData;
-        set { _buf.UserData = value; }
-      }
+      public ref UserData UserData => ref _buf.UserData;
       public object UserState {
         get => _buf.UserState;
         set { _buf.UserState = value; }
@@ -382,6 +379,7 @@ namespace ChunkIO {
 
     sealed class Chunk {
       readonly BufferedWriter _writer;
+      UserData _userData;
 
       public Chunk(BufferedWriter writer) {
         _writer = writer;
@@ -395,7 +393,7 @@ namespace ChunkIO {
       public ArraySegment<byte>? CompressedContent { get; internal set; }
       public MemoryStream Stream => _writer._strm;
       public DateTime CreatedAt { get; } = DateTime.UtcNow;
-      public UserData UserData { get; set; }
+      public ref UserData UserData => ref _userData;
       public object UserState { get; set; }
       public long? CloseAtSize { get; set; }
       public TimeSpan? CloseAtAge { get; }
