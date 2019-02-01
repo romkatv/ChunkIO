@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,38 +76,83 @@ namespace ChunkIO.Test {
       }
     }
 
+    [TestMethod]
+    public void FairnessTest() {
+      foreach (bool sync in new[] { false, true }) {
+        var mutex = new AsyncMutex();
+        var tasks = new Queue<Task>(Enumerable.Range(0, 1024).Select(_ => mutex.LockAsync()));
+        while (tasks.Count > 0) {
+          tasks.Enqueue(mutex.LockAsync());
+          for (int i = 0; i != 2; ++i) {
+            tasks.Dequeue().Wait();
+            mutex.Unlock(sync);
+          }
+        }
+      }
+    }
+
+    [TestMethod]
+    public void ExampleTest() {
+      var expected = new[] {
+        "Worker #0: 0",
+        "Worker #1: 0",
+        "Worker #1: 1",
+        "Worker #1: 2",
+        "Worker #0: 1",
+        "Worker #0: 2",
+      };
+      CollectionAssert.AreEqual(expected, Example().Result);
+
+      async Task<List<string>> Example() {
+        var res = new List<string>();
+        var mutex = new AsyncMutex();
+        await mutex.LockAsync();
+        Task[] tasks = Enumerable.Range(0, 2).Select(Work).ToArray();
+        mutex.Unlock(runNextSynchronously: true);
+        await Task.WhenAll(tasks);
+        return res;
+
+        async Task Work(int worker) {
+          for (int i = 0; i != 3; ++i) {
+            await mutex.LockAsync();
+            res.Add($"Worker #{worker}: {i}");
+            mutex.Unlock(runNextSynchronously: true);
+          }
+        }
+      }
+    }
+
     // Sample run:
     //
-    //   Benchmark(sync: False, threads: 1): 37.0 ns/call.
-    //   Benchmark(sync: False, threads: 2): 68.1 ns/call.
-    //   Benchmark(sync: False, threads: 4): 2,708.0 ns/call.
-    //   Benchmark(sync: False, threads: 8): 2,699.1 ns/call.
-    //   Benchmark(sync: False, threads: 16): 2,743.3 ns/call.
-    //   Benchmark(sync: False, threads: 32): 2,651.1 ns/call.
+    //   Benchmark(sync: True, threads: 1): 14.1 ns/call.
+    //   Benchmark(sync: True, threads: 2): 14.5 ns/call.
+    //   Benchmark(sync: True, threads: 4): 14.6 ns/call.
+    //   Benchmark(sync: True, threads: 32): 15.6 ns/call.
+    //   Benchmark(sync: True, threads: 1024): 14.3 ns/call.
     //
-    //   Benchmark(sync: True, threads: 1): 36.4 ns/call.
-    //   Benchmark(sync: True, threads: 2): 35.6 ns/call.
-    //   Benchmark(sync: True, threads: 4): 39.1 ns/call.
-    //   Benchmark(sync: True, threads: 8): 37.9 ns/call.
-    //   Benchmark(sync: True, threads: 16): 41.5 ns/call.
-    //   Benchmark(sync: True, threads: 32): 41.2 ns/call.
+    //   Benchmark(sync: False, threads: 1): 14.5 ns/call.
+    //   Benchmark(sync: False, threads: 2): 2,526.8 ns/call.
+    //   Benchmark(sync: False, threads: 4): 2,809.5 ns/call.
+    //   Benchmark(sync: False, threads: 32): 2,830.4 ns/call.
+    //   Benchmark(sync: False, threads: 1024): 2,796.9 ns/call.
     //
     // For comparison, here's the same benchmark for SemaphoreSlim.
     //
-    //   Benchmark(threads: 1): 87.0 ns/call.
-    //   Benchmark(threads: 2): 96.8 ns/call.
-    //   Benchmark(threads: 4): 2,493.4 ns/call.
-    //   Benchmark(threads: 8): 2,443.4 ns/call.
-    //   Benchmark(threads: 16): 2,455.1 ns/call.
-    //   Benchmark(threads: 32): 2,407.6 ns/call.
+    //   Benchmark(threads: 1): 86.3 ns/call.
+    //   Benchmark(threads: 2): 105.1 ns/call.
+    //   Benchmark(threads: 4): 2,478.4 ns/call.
+    //   Benchmark(threads: 32): 2,502.1 ns/call.
+    //   Benchmark(threads: 1024): 2,458.7 ns/call.
+    //
+    // Plain Monitor.Enter() + Monitor.Exit() on the same machine takes 18ns.
     [TestMethod]
     public void LockUnlockBenchmark() {
       Console.WriteLine("Warmup:");
       Benchmark(false, 32).Wait();
 
       Console.WriteLine("\nThe real thing:");
-      foreach (bool sync in new[] { false, true }) {
-        foreach (int threads in new[] { 1, 2, 4, 8, 16, 32 }) {
+      foreach (bool sync in new[] { true }) {
+        foreach (int threads in new[] { 1, 2, 4, 32, 1024 }) {
           Benchmark(sync, threads).Wait();
         }
       }
@@ -121,9 +167,9 @@ namespace ChunkIO.Test {
         Console.WriteLine("  Benchmark(sync: {0}, threads: {1}): {2:N1} ns/call.", sync, threads, ns);
 
         async Task Inc() {
+          await Task.Yield();
           while (stopwatch.Elapsed < duration) {
-            await Task.Yield();
-            for (int i = 0; i != 1024; ++i) {
+            for (int i = 0; i != 64; ++i) {
               await mutex.LockAsync();
               ++counter;
               mutex.Unlock(runNextSynchronously: sync);
