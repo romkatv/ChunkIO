@@ -86,8 +86,9 @@ namespace ChunkIO {
   // didn't return to worker #0 until worker #1 had finished. Were worker #1 at some point to yield
   // via Task.Yield(), Task.Delay() or async IO, worker #0 would have resumed earlier.
   //
-  // All lines except the last were printed by the same thread. It's unspecified which thread printed
-  // the last line.
+  // All lines were printed by the same thread. There was no parallelism involved and no ping-ponging
+  // between threads. This is as it should be, given that all work is sandwitched between lock and
+  // unlock.
   //
   // Here's how the call stack looked like when the line "Worker #1: 2" was being printed (most
   // recent call first):
