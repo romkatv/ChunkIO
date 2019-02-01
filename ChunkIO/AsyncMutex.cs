@@ -78,10 +78,29 @@ namespace ChunkIO {
 
     Task LockSlow(CancellationToken cancel) {
       var waiter = new Waiter() { Mutex = this };
-      Task res = waiter.Task = new Task(EndLock, waiter);
+      // It's important for performance for the lambda to have no capture.
+      Task res = waiter.Task = new Task((object state) => {
+        if (((Waiter)state).Cancelled) throw new TaskCanceledException(nameof(LockAsync));
+      }, waiter);
       _waiters.AddLast(waiter);
-      // Note that CancelLock can be called synchronously here.
-      waiter.CancelReg = cancel.Register(CancelLock, waiter);
+      // It's important for performance for the lambda to have no capture.
+      waiter.CancelReg = cancel.Register((object state) => {
+        Task task;
+        var w = (Waiter)state;
+        AsyncMutex m = w.Mutex;
+        lock (m._monitor) {
+          if (w.Task == null) return;
+          task = w.Task;
+          w.Task = null;
+          w.Cancelled = true;
+          m._waiters.Remove(w);
+        }
+        w.CancelReg.Dispose();
+        // Note that this code can execute synchronously from cancel.Register().
+        // If this happens, _monitor is locked here, but task.RunSynchronously() is
+        // still safe to call because the task cannot have continuations.
+        task.RunSynchronously();
+      }, waiter);
       Monitor.Exit(_monitor);
       return res;
     }
@@ -99,27 +118,6 @@ namespace ChunkIO {
         task.Start();
       }
     }
-
-    static readonly Action<object> EndLock = (object state) => {
-      if (((Waiter)state).Cancelled) throw new TaskCanceledException(nameof(LockAsync));
-    };
-
-    static readonly Action<object> CancelLock = (object state) => {
-      Task task;
-      var waiter = (Waiter)state;
-      AsyncMutex m = waiter.Mutex;
-      lock (m._monitor) {
-        if (waiter.Task == null) return;
-        task = waiter.Task;
-        waiter.Task = null;
-        waiter.Cancelled = true;
-        m._waiters.Remove(waiter);
-      }
-      waiter.CancelReg.Dispose();
-      // If _monitor is locked here, task cannot have continuations, so RunSynchronously()
-      // is safe to call.
-      task.RunSynchronously();
-    };
 
     class Waiter : IntrusiveListNode<Waiter> {
       public AsyncMutex Mutex { get; set; }
