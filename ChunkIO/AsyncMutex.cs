@@ -38,8 +38,10 @@ namespace ChunkIO {
     readonly IntrusiveListNode<Waiter>.List _waiters = new IntrusiveListNode<Waiter>.List();
     bool _locked = false;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task LockAsync() => LockAsync(CancellationToken.None);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task LockAsync(CancellationToken cancel) {
       if (cancel.IsCancellationRequested) return Task.FromCanceled(cancel);
       Monitor.Enter(_monitor);
@@ -59,6 +61,7 @@ namespace ChunkIO {
     // When AsyncMutex is used under contention, Unlock(true) is about two orders of magnitude
     // faster. See LockUnlockBenchmark. The downside is that that you have to be careful where
     // you call Unlock(true).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Unlock(bool runNextSynchronously) {
       Monitor.Enter(_monitor);
       Debug.Assert(_locked);
@@ -76,6 +79,7 @@ namespace ChunkIO {
       }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     Task LockSlow(CancellationToken cancel) {
       var waiter = new Waiter() { Mutex = this };
       // It's important for performance for the lambda to have no capture.
@@ -105,6 +109,7 @@ namespace ChunkIO {
       return res;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     void UnlockSlow(bool runNextSynchronously) {
       Waiter waiter = _waiters.First;
       Task task = waiter.Task;
