@@ -83,7 +83,7 @@ namespace ChunkIO {
   //
   // This output is deterministic. It doesn't depend on the whims of the task and thread scheduler.
   // Note how worker #1 started doing its work as soon as worker #0 unlocked the mutex. The control
-  // didn't return to worker #0 until worker #1 had finished. Were orker #1 at some point to yield
+  // didn't return to worker #0 until worker #1 had finished. Were worker #1 at some point to yield
   // via Task.Yield(), Task.Delay() or async IO, worker #0 would have resumed earlier.
   //
   // All lines except the last were printed by the same thread. It's unspecified which thread printed
