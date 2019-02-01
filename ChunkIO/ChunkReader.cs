@@ -121,7 +121,8 @@ namespace ChunkIO {
 
       async Task<bool> ReadNext(Chunk prev) {
         Debug.Assert(res == null);
-        if (prev != null && prev.BeginPosition < from && prev.EndPosition >= from && await prev.IsSkippable()) {
+        if (prev != null && prev.BeginPosition < from && prev.EndPosition >= from &&
+            await prev.IsSkippableAsync()) {
           from = prev.EndPosition;
           if (!Clamp(ref from, ref to, len)) return true;
           res = await Read(from);
@@ -292,7 +293,7 @@ namespace ChunkIO {
       public int ContentLength => _header.ContentLength;
       public UserData UserData => _header.UserData;
 
-      public async Task<bool> IsSkippable() {
+      public async Task<bool> IsSkippableAsync() {
         if (_skippable == null) _skippable = await _reader.IsSkippable(BeginPosition, _header);
         return _skippable.Value;
       }

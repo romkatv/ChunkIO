@@ -65,7 +65,7 @@ namespace ChunkIO.Benchmark {
       using (var writer = new EmptyWriter(fname)) {
         Stopwatch stopwatch = Stopwatch.StartNew();
         for (long i = 0; i != records; ++i) {
-          await writer.Write(new Event<Empty>(new DateTime(i + 1, DateTimeKind.Utc), new Empty()));
+          await writer.WriteAsync(new Event<Empty>(new DateTime(i + 1, DateTimeKind.Utc), new Empty()));
         }
         await writer.FlushAsync(flushToDisk: false);
         double seconds = stopwatch.Elapsed.TotalSeconds;
@@ -82,7 +82,7 @@ namespace ChunkIO.Benchmark {
       using (var writer = new EmptyWriter(fname)) {
         Stopwatch stopwatch = Stopwatch.StartNew();
         for (long i = 0; i != batches; ++i) {
-          await writer.WriteBatch(Batch());
+          await writer.WriteBatchAsync(Batch());
           IEnumerable<Event<Empty>> Batch() {
             for (long j = 0; j != recsPerBatch; ++j) {
               yield return new Event<Empty>(new DateTime(i * recsPerBatch + j + 1, DateTimeKind.Utc), new Empty());

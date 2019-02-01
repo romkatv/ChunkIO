@@ -69,7 +69,7 @@ namespace ChunkIO.Test {
       Debug.Assert(bufRecs > 0);
       using (var writer = new Writer(fname, new WriterOptions() { CloseChunk = null, DisposeFlushToDisk = false })) {
         for (long i = start; i != start + count; ++i) {
-          await writer.Write(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
+          await writer.WriteAsync(new Event<long>(new DateTime(i, DateTimeKind.Utc), i));
           if ((i - start + 1) % bufRecs == 0) await Flush();
         }
         await Flush();
@@ -268,7 +268,7 @@ namespace ChunkIO.Test {
           long written = 0;
           while (true) {
             try {
-              await writer.Write(new Event<long>(new DateTime(written + 1, DateTimeKind.Utc), written + 1));
+              await writer.WriteAsync(new Event<long>(new DateTime(written + 1, DateTimeKind.Utc), written + 1));
               ++written;
               break;
             } catch (TimeSeriesWriteException e) {
@@ -332,7 +332,7 @@ namespace ChunkIO.Test {
 
       async Task Test(string fname, WriterOptions opt) {
         using (var writer = new Writer(fname, opt)) {
-          await writer.Write(new Event<long>(new DateTime(1, DateTimeKind.Utc), 1));
+          await writer.WriteAsync(new Event<long>(new DateTime(1, DateTimeKind.Utc), 1));
           while (true) {
             ReadStats stats = await ReadAllAfter(fname, 0, 1, FileState.Expanding);
             if (stats.Total > 0) {
@@ -447,7 +447,7 @@ namespace ChunkIO.Test {
             for (int i = 0; i != M; ++i) {
               int val = x * M + i + 1;
               await Task.Yield();
-              await Do(() => writer.Write(new Event<long>(new DateTime(val, DateTimeKind.Utc), val)));
+              await Do(() => writer.WriteAsync(new Event<long>(new DateTime(val, DateTimeKind.Utc), val)));
             }
             await Do(() => writer.FlushAsync(flushToDisk: false));
             await Do(() => RemoteFlush.FlushAsync(writer.Id, flushToDisk: false));

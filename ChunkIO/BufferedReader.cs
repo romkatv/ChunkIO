@@ -169,7 +169,7 @@ namespace ChunkIO {
       }
     }
 
-    public static async Task<InputChunk> Decompress(IChunk chunk) {
+    static async Task<InputChunk> Decompress(IChunk chunk) {
       var content = new byte[chunk.ContentLength];
       if (!await chunk.ReadContentAsync(content, 0)) return null;
       var res = new InputChunk(chunk.BeginPosition, chunk.EndPosition, chunk.UserData);

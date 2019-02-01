@@ -136,7 +136,7 @@ namespace ChunkIO.Example {
           // We are always sending patches to the writer. The writer then decides whether to
           // encode them as snapshots or patches on disk.
           Console.WriteLine("  {0}", Print(e));
-          return writer.Write(e);
+          return writer.WriteAsync(e);
         }
 
         // Write the initial snapshot. It'll go into the first chunk.

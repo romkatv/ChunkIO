@@ -210,7 +210,7 @@ namespace ChunkIO {
     //
     // If an error was encountered when an attempt was made to flush the last chunk,
     // LockChunk() will try to flush it and will throw if unable to do so.
-    public async Task<IOutputChunk> LockChunk() {
+    public async Task<IOutputChunk> LockChunkAsync() {
       await _mutex.LockAsync();
       try {
         CheckDispose();
@@ -376,7 +376,7 @@ namespace ChunkIO {
       public Task DisposeAsync() {
         if (!_locked) return Task.CompletedTask;
         _locked = false;
-        return _buf.Unlock();
+        return _buf.UnlockAsync();
       }
     }
 
@@ -402,7 +402,7 @@ namespace ChunkIO {
       public bool IsAbandoned { get; internal set; }
 
       public void Abandon() { IsAbandoned = true; }
-      public Task Unlock() => _writer.Unlock();
+      public Task UnlockAsync() => _writer.Unlock();
 
       public bool Close(CompressionLevel lvl) {
         if (IsAbandoned) return false;

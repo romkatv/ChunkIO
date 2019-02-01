@@ -114,11 +114,11 @@ namespace ChunkIO {
     // The only exception it throws is TimeSeriesWriteException. You can examine its Result field
     // to figure out what happened to the record(s) you were trying to write. InnerException is the
     // culprit. It's never null.
-    public async Task WriteBatch(IEnumerable<T> records) {
+    public async Task WriteBatchAsync(IEnumerable<T> records) {
       TimeSeriesWriteResult res = TimeSeriesWriteResult.RecordsDropped;
       try {
         if (records == null) throw new ArgumentNullException(nameof(records));
-        IOutputChunk buf = await _writer.LockChunk();
+        IOutputChunk buf = await _writer.LockChunkAsync();
         try {
           IEnumerator<T> e = records.GetEnumerator();
           if (!e.MoveNext()) {
@@ -146,7 +146,7 @@ namespace ChunkIO {
       }
     }
 
-    public Task Write(T val) => WriteBatch(new[] { val });
+    public Task WriteAsync(T val) => WriteBatchAsync(new[] { val });
 
     public Task FlushAsync(bool flushToDisk) => _writer.FlushAsync(flushToDisk);
 
@@ -321,7 +321,7 @@ namespace ChunkIO {
     //
     // The output ChunkIO file is written with default WriterOptions. Some input chunks may get
     // merged but no chunks get split.
-    public static async Task Transcode<T, U>(
+    public static async Task TranscodeAsync<T, U>(
         string input,
         string output,
         ITimeSeriesDecoder<T> decoder,
@@ -332,7 +332,7 @@ namespace ChunkIO {
         try {
           long len = await reader.FlushRemoteWriterAsync(flushToDisk: false);
           await reader.ReadAfter(DateTime.MinValue, 0, len).ForEachAsync(async (IDecodedChunk<T> c) => {
-            await writer.WriteBatch(c.Select(transform));
+            await writer.WriteBatchAsync(c.Select(transform));
           });
         } finally {
           await writer.DisposeAsync();
@@ -340,13 +340,13 @@ namespace ChunkIO {
       }
     }
 
-    public static Task Transcode<T>(
+    public static Task TranscodeAsync<T>(
         string input,
         string output,
         ITimeSeriesDecoder<T> decoder,
         ITimeSeriesEncoder<T> encoder,
         Func<T, T> transform = null) {
-      return Transcode<T, T>(input, output, decoder, encoder, transform ?? (x => x));
+      return TranscodeAsync<T, T>(input, output, decoder, encoder, transform ?? (x => x));
     }
   }
 }
