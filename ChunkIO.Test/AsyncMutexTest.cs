@@ -168,16 +168,16 @@ namespace ChunkIO.Test {
     //
     // For comparison, here's the same benchmark for SemaphoreSlim(1, 1):
     //
-    //   Benchmark(cancelable: False, threads:     1):    86.1 ns/call
-    //   Benchmark(cancelable: False, threads:     2):   121.2 ns/call
-    //   Benchmark(cancelable: False, threads:     4): 2,394.1 ns/call
-    //   Benchmark(cancelable: False, threads:    32): 2,467.8 ns/call
-    //   Benchmark(cancelable: False, threads: 1,024): 2,391.4 ns/call
-    //   Benchmark(cancelable:  True, threads:     1):    86.9 ns/call
-    //   Benchmark(cancelable:  True, threads:     2): 1,666.1 ns/call
-    //   Benchmark(cancelable:  True, threads:     4): 8,956.5 ns/call
-    //   Benchmark(cancelable:  True, threads:    32): 9,223.9 ns/call
-    //   Benchmark(cancelable:  True, threads: 1,024):  11,011 ns/call
+    //   Benchmark(cancelable: False, threads:     1):     86.1 ns/call
+    //   Benchmark(cancelable: False, threads:     2):    121.2 ns/call
+    //   Benchmark(cancelable: False, threads:     4):  2,394.1 ns/call
+    //   Benchmark(cancelable: False, threads:    32):  2,467.8 ns/call
+    //   Benchmark(cancelable: False, threads: 1,024):  2,391.4 ns/call
+    //   Benchmark(cancelable:  True, threads:     1):     86.9 ns/call
+    //   Benchmark(cancelable:  True, threads:     2):  1,666.1 ns/call
+    //   Benchmark(cancelable:  True, threads:     4):  8,956.5 ns/call
+    //   Benchmark(cancelable:  True, threads:    32):  9,223.9 ns/call
+    //   Benchmark(cancelable:  True, threads: 1,024): 11,011.6 ns/call
     //
     // Plain Monitor.Enter() + Monitor.Exit() on the same machine takes 18ns.
     [TestMethod]
