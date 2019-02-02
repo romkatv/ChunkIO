@@ -166,7 +166,7 @@ namespace ChunkIO.Test {
     //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:    32): 3,009.3 ns/call
     //   Benchmark(runNextSynchronously: False, cancelable:  True, threads: 1,024): 3,046.2 ns/call
     //
-    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1).
+    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1):
     //
     //   Benchmark(cancelable: False, threads:     1):    86.1 ns/call
     //   Benchmark(cancelable: False, threads:     2):   121.2 ns/call
@@ -239,7 +239,7 @@ namespace ChunkIO.Test {
     //   Benchmark(threads:    32): 1,976.9 ns/call
     //   Benchmark(threads: 1,024): 1,418.4 ns/call
     //
-    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1).
+    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1):
     //
     //   Benchmark(threads:     1): 16,710.7 ns/call
     //   Benchmark(threads:     2): 20,892.6 ns/call
