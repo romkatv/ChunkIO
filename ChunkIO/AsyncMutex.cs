@@ -38,10 +38,14 @@ namespace ChunkIO {
   //
   // When there is no contention, AsyncMutex is about 30% faster than System.Threading.Monitor
   // and 6 times faster than System.Threading.SemaphoreSlim (~14ns for lock + unlock with AsyncMutex
-  // vs ~18ns for Monitor and ~86ns for SemaphoreSlim). When AsyncMutex is used under contention,
-  // LockAsync() + Unlock(false) is about as fast as SemaphoreSlim (~2.5us).
-  // LockAsync() + Unlock(true), however, takes ~14ns regardless of the number of contending
-  // threads.
+  // vs ~18ns for Monitor and ~86ns for SemaphoreSlim).
+  //
+  // Under contention, LockAsync() + Unlock(false) is about 7% faster than SemaphoreSlim for
+  // non-cancelable tasks, and 35% faster for cancelable tasks. Cancelation itself is 20 times faster
+  // in AsyncMutex than in SemaphoreSlim.
+  //
+  // LockAsync() + Unlock(true) takes ~14ns both for cancelable and non-cancelable tasks and regardless
+  // of the number of contending threads. This is up to 200 times faster than SemaphoreSlim.
   //
   // The downside of Unlock(true) is that you have to be careful where you call it.
   // While Unlock(false) never reenters and always returns quickly, Unlock(true) allows the
@@ -116,14 +120,11 @@ namespace ChunkIO {
     int _clients = 0;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task LockAsync() => LockAsync(CancellationToken.None);
+    public Task LockAsync() => DoLock(CancellationToken.None);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task LockAsync(CancellationToken cancel) {
-      if (cancel.IsCancellationRequested) return Task.FromCanceled(cancel);
-      if (Interlocked.CompareExchange(ref _clients, 1, 0) == 0) return Task.CompletedTask;
-      return LockSlow(cancel);
-    }
+    public Task LockAsync(CancellationToken cancel) =>
+        cancel.IsCancellationRequested ? Task.FromCanceled(cancel) : DoLock(cancel);
 
     // Read the class comments to understand what runNextSynchronously means.
     // The short version is that it makes no difference if there is no contention.
@@ -136,82 +137,104 @@ namespace ChunkIO {
 
     public bool IsLocked => Volatile.Read(ref _clients) != 0;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Task DoLock(CancellationToken cancel) {
+      if (Interlocked.CompareExchange(ref _clients, 1, 0) == 0) return Task.CompletedTask;
+      return LockSlow(cancel);
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     Task LockSlow(CancellationToken cancel) {
+      var waiter = new Waiter(this, cancel);
       lock (_monitor) {
+        if (waiter.Task == null) return Task.FromCanceled(cancel);
         if (Interlocked.Exchange(ref _clients, 2) == 0) {
           Debug.Assert(_waiters.First == null);
           Volatile.Write(ref _clients, 1);
-          return Task.CompletedTask;
+          waiter.Drop();
+        } else {
+          _waiters.AddLast(waiter);
+          return waiter.Task;
         }
-
-        var waiter = new Waiter() { Mutex = this };
-        // It's important for performance for the lambda to have no capture.
-        Task res = waiter.Task = new Task((object state) => {
-          var w = (Waiter)state;
-          Debug.Assert(w.Task == null);
-          if (w.Cancelled) throw new TaskCanceledException(nameof(LockAsync));
-        }, waiter);
-        _waiters.AddLast(waiter);
-
-        // It's important for performance for the lambda to have no capture.
-        waiter.CancelReg = cancel.Register((object state) => {
-          var w = (Waiter)state;
-          // Note that this code can execute synchronously from cancel.Register().
-          // If this happens, _monitor is locked here, but task.RunSynchronously() is
-          // still safe to call because the task cannot have continuations.
-          w.Mutex.FinishWaiter(w, runSynchronously: true);
-        }, waiter);
-
-        return res;
       }
+      waiter.Dispose();
+      return Task.CompletedTask;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     void UnlockSlow(bool runNextSynchronously) {
-      FinishWaiter(null, runNextSynchronously);
-    }
-
-    // When called from Unlock(), waiter is null. When called due to the cancellation of
-    // LockAsync() task, waiter is the object associated with the task.
-    void FinishWaiter(Waiter waiter, bool runSynchronously) {
       Task task;
-
+      Waiter waiter;
       lock (_monitor) {
-        if (waiter == null) {
-          if (_clients == 1) {
-            Debug.Assert(_waiters.First == null);
-            Volatile.Write(ref _clients, 0);
-            return;
-          }
-          Debug.Assert(_waiters.First != null);
-          waiter = _waiters.First;
-        } else {
-          if (waiter.Task == null) return;
-          waiter.Cancelled = true;
+        if (_clients == 1) {
+          Debug.Assert(_waiters.First == null);
+          Volatile.Write(ref _clients, 0);
+          return;
         }
+        Debug.Assert(_waiters.First != null);
         Debug.Assert(_clients == 2);
+        waiter = _waiters.First;
         task = waiter.Task;
-        waiter.Task = null;
-        _waiters.Remove(waiter);
-        if (_waiters.First == null) Volatile.Write(ref _clients, 1);
+        waiter.Finish();
       }
 
-      waiter.CancelReg.Dispose();
-      if (runSynchronously) {
+      waiter.Dispose();
+      if (runNextSynchronously) {
         task.RunSynchronously();
       } else {
         task.Start();
       }
     }
 
-    // Task and Cancelled are protected by _monitor. Only these two fields can be
-    // modified after initialization.
     class Waiter : IntrusiveListNode<Waiter> {
-      public AsyncMutex Mutex { get; set; }
-      public Task Task { get; set; }
-      public bool Cancelled { get; set; }
-      public CancellationTokenRegistration CancelReg { get; set; }
+      readonly CancellationTokenSource _cancel;
+      readonly AsyncMutex _outer;
+
+      public Waiter(AsyncMutex outer, CancellationToken cancel) {
+        Debug.Assert(!Monitor.IsEntered(outer._monitor));
+        _outer = outer;
+        if (cancel.CanBeCanceled) {
+          _cancel = new CancellationTokenSource();
+          Task = new Task(() => { }, _cancel.Token);
+          cancel.Register((object state) => ((Waiter)state).Cancel(), this);
+        } else {
+          Task = new Task(() => { });
+        }
+      }
+
+      public void Drop() {
+        Debug.Assert(Monitor.IsEntered(_outer._monitor));
+        Debug.Assert(Task != null);
+        Task = null;
+      }
+
+      public void Finish() {
+        Drop();
+        _outer._waiters.Remove(this);
+        if (_outer._waiters.First == null) Volatile.Write(ref _outer._clients, 1);
+      }
+
+      public void Dispose() {
+        Debug.Assert(!Monitor.IsEntered(_outer._monitor));
+        _cancel?.Dispose();
+      }
+
+      public Task Task { get; internal set; }
+
+      void Cancel() {
+        Debug.Assert(!Monitor.IsEntered(_outer._monitor));
+        lock (_outer._monitor) {
+          if (Task == null) return;
+          Task = null;
+          if (_outer._waiters.IsLinked(this)) {
+            Debug.Assert(_outer._clients == 2);
+            _outer._waiters.Remove(this);
+            if (_outer._waiters.First == null) Volatile.Write(ref _outer._clients, 1);
+          }
+        }
+        _cancel.Cancel();
+        _cancel.Dispose();
+      }
     }
   }
 }

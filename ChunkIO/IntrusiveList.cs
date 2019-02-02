@@ -31,6 +31,20 @@ namespace ChunkIO {
         Debug.Assert(First != null && Last != null);
       }
 
+      public bool IsLinked(T node) {
+        Debug.Assert(node != null);
+        if (node.Prev != null || node.Next != null) {
+          Debug.Assert(First != null && Last != null);
+          return true;
+        }
+        if (First == node) {
+          Debug.Assert(Last == node);
+          return true;
+        }
+        Debug.Assert(Last != node);
+        return false;
+      }
+
       public void Remove(T node) {
         Debug.Assert(node != null);
         T prev = node.Prev;

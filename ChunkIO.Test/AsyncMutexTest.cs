@@ -26,7 +26,7 @@ namespace ChunkIO.Test {
   [TestClass]
   public class AsyncMutexTest {
     [TestMethod]
-    public void LockUnlockTest() {
+    public void LockUnlockStressTest() {
       foreach (bool sync in new[] { false, true }) {
         const int N = 64 << 10;
         long counter = 0;
@@ -46,7 +46,7 @@ namespace ChunkIO.Test {
     }
 
     [TestMethod]
-    public void CancelTest() {
+    public void CancelStressTest() {
       foreach (bool sync in new[] { false, true }) {
         const int N = 64;
         long counter = 0;
@@ -61,10 +61,9 @@ namespace ChunkIO.Test {
               Task t = mutex.LockAsync(cancel.Token);
               await Task.Yield();
               cancel.Cancel();
-              try {
+              if (!t.IsCanceled) {
                 await t;
                 break;
-              } catch (TaskCanceledException) {
               }
             }
           }
@@ -73,6 +72,25 @@ namespace ChunkIO.Test {
           counter = next;
           mutex.Unlock(runNextSynchronously: sync);
         }
+      }
+    }
+
+    [TestMethod]
+    public void CancelTest() {
+      var mutex = new AsyncMutex();
+      using (var cancel = new CancellationTokenSource()) {
+        mutex.LockAsync().Wait();
+        Task t = mutex.LockAsync(cancel.Token);
+        Assert.AreEqual(TaskStatus.Created, t.Status);
+        mutex.Unlock(runNextSynchronously: true);
+        t.Wait();
+
+        t = mutex.LockAsync(cancel.Token);
+        cancel.Cancel();
+        Assert.AreEqual(TaskStatus.Canceled, t.Status);
+
+        t = mutex.LockAsync(cancel.Token);
+        Assert.AreEqual(TaskStatus.Canceled, t.Status);
       }
     }
 
@@ -124,55 +142,140 @@ namespace ChunkIO.Test {
 
     // Sample run:
     //
-    //   Benchmark(sync: True, threads: 1): 14.1 ns/call.
-    //   Benchmark(sync: True, threads: 2): 14.5 ns/call.
-    //   Benchmark(sync: True, threads: 4): 14.6 ns/call.
-    //   Benchmark(sync: True, threads: 32): 15.6 ns/call.
-    //   Benchmark(sync: True, threads: 1024): 14.3 ns/call.
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     1):    14.5 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     2):    15.1 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     4):    14.5 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:    32):    15.1 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads: 1,024):    14.6 ns/call
     //
-    //   Benchmark(sync: False, threads: 1): 14.5 ns/call.
-    //   Benchmark(sync: False, threads: 2): 2,526.8 ns/call.
-    //   Benchmark(sync: False, threads: 4): 2,809.5 ns/call.
-    //   Benchmark(sync: False, threads: 32): 2,830.4 ns/call.
-    //   Benchmark(sync: False, threads: 1024): 2,796.9 ns/call.
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     1):    15.1 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     2):    14.8 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     4):    14.8 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:    32):    15.5 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads: 1,024):    14.8 ns/call
     //
-    // For comparison, here's the same benchmark for SemaphoreSlim.
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     1):    14.5 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     2): 1,689.6 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     4): 2,231.2 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:    32): 2,229.8 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads: 1,024): 2,220.2 ns/call
     //
-    //   Benchmark(threads: 1): 86.3 ns/call.
-    //   Benchmark(threads: 2): 105.1 ns/call.
-    //   Benchmark(threads: 4): 2,478.4 ns/call.
-    //   Benchmark(threads: 32): 2,502.1 ns/call.
-    //   Benchmark(threads: 1024): 2,458.7 ns/call.
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     1):    15.1 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     2):   171.5 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     4): 2,893.5 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:    32): 3,009.3 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads: 1,024): 3,046.2 ns/call
+    //
+    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1).
+    //
+    //   Benchmark(cancelable: False, threads:     1):    86.1 ns/call
+    //   Benchmark(cancelable: False, threads:     2):   121.2 ns/call
+    //   Benchmark(cancelable: False, threads:     4): 2,394.1 ns/call
+    //   Benchmark(cancelable: False, threads:    32): 2,467.8 ns/call
+    //   Benchmark(cancelable: False, threads: 1,024): 2,391.4 ns/call
+    //   Benchmark(cancelable:  True, threads:     1):    86.9 ns/call
+    //   Benchmark(cancelable:  True, threads:     2): 1,666.1 ns/call
+    //   Benchmark(cancelable:  True, threads:     4): 8,956.5 ns/call
+    //   Benchmark(cancelable:  True, threads:    32): 9,223.9 ns/call
+    //   Benchmark(cancelable:  True, threads: 1,024):  11,011 ns/call
     //
     // Plain Monitor.Enter() + Monitor.Exit() on the same machine takes 18ns.
     [TestMethod]
     public void LockUnlockBenchmark() {
-      Console.WriteLine("Warmup:");
-      Benchmark(false, 32).Wait();
+      using (var cancel = new CancellationTokenSource()) {
+        Console.WriteLine("Warmup:");
+        Benchmark(runNextSynchronously: false, cancelable: false, threads: 1024).Wait();
+        Benchmark(runNextSynchronously: false, cancelable: true, threads: 1024).Wait();
+        Benchmark(runNextSynchronously: true, cancelable: false, threads: 1024).Wait();
+        Benchmark(runNextSynchronously: true, cancelable: true, threads: 1024).Wait();
 
-      Console.WriteLine("\nThe real thing:");
-      foreach (bool sync in new[] { true }) {
-        foreach (int threads in new[] { 1, 2, 4, 32, 1024 }) {
-          Benchmark(sync, threads).Wait();
+        Console.WriteLine("\nThe real thing:");
+        foreach (bool sync in new[] { true, false }) {
+          foreach (bool c in new[] { false, true }) {
+            foreach (int threads in new[] { 1, 2, 4, 32, 1024 }) {
+              Benchmark(runNextSynchronously: sync, cancelable: c, threads: threads).Wait();
+            }
+          }
+        }
+
+        async Task Benchmark(bool runNextSynchronously, bool cancelable, int threads) {
+          long counter = 0;
+          var mutex = new AsyncMutex();
+          TimeSpan duration = TimeSpan.FromSeconds(1);
+          Stopwatch stopwatch = Stopwatch.StartNew();
+          await Task.WhenAll(Enumerable.Range(0, threads).Select(_ => Inc()));
+          double ns = 1e9 * stopwatch.Elapsed.TotalSeconds / counter;
+          Console.WriteLine(
+              "  Benchmark(runNextSynchronously: {0,5}, cancelable: {1,5}, threads: {2,5:N0}): {3,7:N1} ns/call",
+              runNextSynchronously, cancelable, threads, ns);
+
+          async Task Inc() {
+            await Task.Yield();
+            while (stopwatch.Elapsed < duration) {
+              if (cancelable) {
+                for (int i = 0; i != 64; ++i) {
+                  await mutex.LockAsync(cancel.Token);
+                  ++counter;
+                  mutex.Unlock(runNextSynchronously: runNextSynchronously);
+                }
+              } else {
+                for (int i = 0; i != 64; ++i) {
+                  await mutex.LockAsync();
+                  ++counter;
+                  mutex.Unlock(runNextSynchronously: runNextSynchronously);
+                }
+              }
+            }
+          }
         }
       }
+    }
 
-      async Task Benchmark(bool sync, int threads) {
+    // Sample run:
+    //
+    //   Benchmark(threads:     1):   849.7 ns/call
+    //   Benchmark(threads:     2):   931.2 ns/call
+    //   Benchmark(threads:     4):   946.4 ns/call
+    //   Benchmark(threads:    32): 1,976.9 ns/call
+    //   Benchmark(threads: 1,024): 1,418.4 ns/call
+    //
+    // For comparison, here's the same benchmark for SemaphoreSlim(1, 1).
+    //
+    //   Benchmark(threads:     1): 16,710.7 ns/call
+    //   Benchmark(threads:     2): 20,892.6 ns/call
+    //   Benchmark(threads:     4): 25,353.9 ns/call
+    //   Benchmark(threads:    32): 30,765.6 ns/call
+    //   Benchmark(threads: 1,024): 35,038.7 ns/call
+    [TestMethod]
+    public void LockCancelBenchmark() {
+      Console.WriteLine("Warmup:");
+      Benchmark(32).Wait();
+
+      Console.WriteLine("\nThe real thing:");
+      foreach (int threads in new[] { 1, 2, 4, 32, 1024 }) {
+        Benchmark(threads).Wait();
+      }
+
+      async Task Benchmark(int threads) {
         long counter = 0;
         var mutex = new AsyncMutex();
+        await mutex.LockAsync();
         TimeSpan duration = TimeSpan.FromSeconds(1);
         Stopwatch stopwatch = Stopwatch.StartNew();
-        await Task.WhenAll(Enumerable.Range(0, threads).Select(_ => Inc()));
+        await Task.WhenAll(Enumerable.Range(0, threads).Select(_ => Run()));
         double ns = 1e9 * stopwatch.Elapsed.TotalSeconds / counter;
-        Console.WriteLine("  Benchmark(sync: {0}, threads: {1}): {2:N1} ns/call.", sync, threads, ns);
+        Console.WriteLine("  Benchmark(threads: {0,5:N0}): {1,7:N1} ns/call", threads, ns);
 
-        async Task Inc() {
+        async Task Run() {
           await Task.Yield();
           while (stopwatch.Elapsed < duration) {
             for (int i = 0; i != 64; ++i) {
-              await mutex.LockAsync();
+              using (var c = new CancellationTokenSource()) {
+                Task t = mutex.LockAsync(c.Token);
+                c.Cancel();
+                Debug.Assert(t.IsCanceled);
+              }
               ++counter;
-              mutex.Unlock(runNextSynchronously: sync);
             }
           }
         }
