@@ -27,7 +27,7 @@ namespace ChunkIO {
   //
   // AsyncMutex is fair. The following assertion holds:
   //
-  //   async Task Fair(AsyncMutex mutex) {
+  //   void Fair(AsyncMutex mutex) {
   //     Task t1 = mutex.LockAsync();
   //     Task t2 = mutex.LockAsync();
   //     Debug.Assert(!t2.IsCompleted);
