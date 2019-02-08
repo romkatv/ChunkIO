@@ -81,7 +81,7 @@ namespace ChunkIO.Test {
       using (var cancel = new CancellationTokenSource()) {
         mutex.LockAsync().Wait();
         Task t = mutex.LockAsync(cancel.Token);
-        Assert.AreEqual(TaskStatus.Created, t.Status);
+        Assert.IsFalse(t.IsCompleted);
         mutex.Unlock(runNextSynchronously: true);
         t.Wait();
 
@@ -89,8 +89,9 @@ namespace ChunkIO.Test {
         cancel.Cancel();
         Assert.AreEqual(TaskStatus.Canceled, t.Status);
 
+        mutex.Unlock(runNextSynchronously: true);
         t = mutex.LockAsync(cancel.Token);
-        Assert.AreEqual(TaskStatus.Canceled, t.Status);
+        Assert.AreEqual(TaskStatus.RanToCompletion, t.Status);
       }
     }
 
@@ -142,29 +143,29 @@ namespace ChunkIO.Test {
 
     // Sample run:
     //
-    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     1):    14.5 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     2):    15.1 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     1):    14.8 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     2):    14.4 ns/call
     //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:     4):    14.5 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:    32):    15.1 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads: 1,024):    14.6 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads:    32):    14.5 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable: False, threads: 1,024):    14.8 ns/call
     //
-    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     1):    15.1 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     2):    14.8 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     1):    14.2 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     2):    14.9 ns/call
     //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:     4):    14.8 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:    32):    15.5 ns/call
-    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads: 1,024):    14.8 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads:    32):    14.7 ns/call
+    //   Benchmark(runNextSynchronously:  True, cancelable:  True, threads: 1,024):    14.9 ns/call
     //
-    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     1):    14.5 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     2): 1,689.6 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     4): 2,231.2 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:    32): 2,229.8 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable: False, threads: 1,024): 2,220.2 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     1):    14.6 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     2): 1,516.4 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:     4): 2,409.1 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads:    32): 2,367.4 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable: False, threads: 1,024): 2,394.5 ns/call
     //
-    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     1):    15.1 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     2):   171.5 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     4): 2,893.5 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:    32): 3,009.3 ns/call
-    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads: 1,024): 3,046.2 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     1):    14.8 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     2): 1,603.4 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:     4): 2,422.3 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads:    32): 2,430.6 ns/call
+    //   Benchmark(runNextSynchronously: False, cancelable:  True, threads: 1,024): 2,476.2 ns/call
     //
     // For comparison, here's the same benchmark for SemaphoreSlim(1, 1):
     //
@@ -173,6 +174,7 @@ namespace ChunkIO.Test {
     //   Benchmark(cancelable: False, threads:     4):  2,394.1 ns/call
     //   Benchmark(cancelable: False, threads:    32):  2,467.8 ns/call
     //   Benchmark(cancelable: False, threads: 1,024):  2,391.4 ns/call
+    //
     //   Benchmark(cancelable:  True, threads:     1):     86.9 ns/call
     //   Benchmark(cancelable:  True, threads:     2):  1,666.1 ns/call
     //   Benchmark(cancelable:  True, threads:     4):  8,956.5 ns/call
@@ -233,11 +235,11 @@ namespace ChunkIO.Test {
 
     // Sample run:
     //
-    //   Benchmark(threads:     1):   849.7 ns/call
-    //   Benchmark(threads:     2):   931.2 ns/call
-    //   Benchmark(threads:     4):   946.4 ns/call
-    //   Benchmark(threads:    32): 1,976.9 ns/call
-    //   Benchmark(threads: 1,024): 1,418.4 ns/call
+    //   Benchmark(threads:     1):   605.7 ns/call
+    //   Benchmark(threads:     2):   638.0 ns/call
+    //   Benchmark(threads:     4):   674.1 ns/call
+    //   Benchmark(threads:    32): 1,090.2 ns/call
+    //   Benchmark(threads: 1,024): 1,125.9 ns/call
     //
     // For comparison, here's the same benchmark for SemaphoreSlim(1, 1):
     //

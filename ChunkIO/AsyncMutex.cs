@@ -36,6 +36,16 @@ namespace ChunkIO {
   // Corollary: To wait until all inflight lock + unlock requests are finished (a.k.a. flush or drain),
   // you can simply lock and unlock.
   //
+  // When passing an already cancelled cancellation token to AsyncMutex, the lock will be acquired if
+  // and only if it can be done instantly without waiting.
+  //
+  // When a suspended task returned by LockAsync() gets cancelled, it always completes synchronously.
+  //
+  // The reason LockAsync() returns plain Task rather than Task<IDisposable> is efficiency. Returning
+  // Task<IDisposable> would either make LockAsync() slower or increase the size of AsyncMutex and make
+  // its constructor slower. Whoever wants LockAsync() that returns Task<IDisposable> can define their
+  // own class as a straightforward wrapper around AsyncMutex.
+  //
   // When there is no contention, AsyncMutex is about 30% faster than System.Threading.Monitor
   // and 6 times faster than System.Threading.SemaphoreSlim (~14ns for lock + unlock with AsyncMutex
   // vs ~18ns for Monitor and ~86ns for SemaphoreSlim).
@@ -120,22 +130,29 @@ namespace ChunkIO {
     int _clients = 0;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task LockAsync() => DoLock(CancellationToken.None);
+    public Task LockAsync() => LockAsync(CancellationToken.None);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task LockAsync(CancellationToken cancel) =>
-        cancel.IsCancellationRequested ? Task.FromCanceled(cancel) : DoLock(cancel);
+    public Task LockAsync(CancellationToken cancel) {
+      if (Interlocked.CompareExchange(ref _clients, 1, 0) == 0) return Task.CompletedTask;
+      return LockSlow(cancel);
+    }
 
     // Read the class comments to understand what runNextSynchronously means.
     // The short version is that it makes no difference if there is no contention.
     // Under contention runNextSynchronously=true is much faster but also more subtle.
+    //
+    // If Unlock() is called while not holding a lock, the behavior is undefined.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Unlock(bool runNextSynchronously) {
       if (Interlocked.CompareExchange(ref _clients, 0, 1) == 1) return;
       UnlockSlow(runNextSynchronously);
     }
 
-    public bool IsLocked => Volatile.Read(ref _clients) != 0;
+    public bool IsLocked {
+      [MethodImpl(MethodImplOptions.AggressiveInlining)]
+      get => Volatile.Read(ref _clients) != 0;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Task DoLock(CancellationToken cancel) {
@@ -145,9 +162,10 @@ namespace ChunkIO {
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     Task LockSlow(CancellationToken cancel) {
+      if (cancel.IsCancellationRequested) return Task.FromCanceled(cancel);
       var waiter = new Waiter(this, cancel);
       lock (_monitor) {
-        if (waiter.Task == null) return Task.FromCanceled(cancel);
+        if (waiter.Done) return Task.FromCanceled(cancel);
         if (Interlocked.Exchange(ref _clients, 2) == 0) {
           Debug.Assert(_waiters.First == null);
           Volatile.Write(ref _clients, 1);
@@ -163,7 +181,7 @@ namespace ChunkIO {
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     void UnlockSlow(bool runNextSynchronously) {
-      Task task;
+      TaskCompletionSource<object> task;
       Waiter waiter;
       lock (_monitor) {
         if (_clients == 1) {
@@ -174,66 +192,87 @@ namespace ChunkIO {
         Debug.Assert(_waiters.First != null);
         Debug.Assert(_clients == 2);
         waiter = _waiters.First;
-        task = waiter.Task;
-        waiter.Finish();
+        task = waiter.Finish();
       }
 
       waiter.Dispose();
       if (runNextSynchronously) {
-        task.RunSynchronously();
+        task.SetResult(null);
       } else {
-        task.Start();
+        new Task((object t) => ((TaskCompletionSource<object>)t).SetResult(null), task).Start();
       }
     }
 
+    // This class is tightly coupled with AsyncMutex. Trying to undrestand its semantics
+    // in isolation is futile.
     class Waiter : IntrusiveListNode<Waiter> {
-      readonly CancellationTokenSource _cancel;
       readonly AsyncMutex _outer;
+      readonly CancellationTokenRegistration _reg;
+      TaskCompletionSource<object> _task = new TaskCompletionSource<object>();
 
       public Waiter(AsyncMutex outer, CancellationToken cancel) {
         Debug.Assert(!Monitor.IsEntered(outer._monitor));
         _outer = outer;
         if (cancel.CanBeCanceled) {
-          _cancel = new CancellationTokenSource();
-          Task = new Task(() => { }, _cancel.Token);
-          cancel.Register((object state) => ((Waiter)state).Cancel(), this);
-        } else {
-          Task = new Task(() => { });
+          _reg = cancel.Register((object state) => ((Waiter)state).Cancel(), this);
         }
       }
 
       public void Drop() {
         Debug.Assert(Monitor.IsEntered(_outer._monitor));
-        Debug.Assert(Task != null);
-        Task = null;
+        Debug.Assert(_task != null);
+        _task = null;
       }
 
-      public void Finish() {
-        Drop();
+      public TaskCompletionSource<object> Finish() {
+        Debug.Assert(Monitor.IsEntered(_outer._monitor));
+        Debug.Assert(_task != null);
+        TaskCompletionSource<object> res = _task;
+        _task = null;
         _outer._waiters.Remove(this);
         if (_outer._waiters.First == null) Volatile.Write(ref _outer._clients, 1);
+        return res;
       }
 
       public void Dispose() {
         Debug.Assert(!Monitor.IsEntered(_outer._monitor));
-        _cancel?.Dispose();
+        Debug.Assert(_task == null);
+        _reg.Dispose();
       }
 
-      public Task Task { get; internal set; }
+      public Task Task {
+        get {
+          Debug.Assert(Monitor.IsEntered(_outer._monitor));
+          Debug.Assert(_task != null);
+          return _task.Task;
+        }
+      }
+
+      public bool Done {
+        get {
+          Debug.Assert(Monitor.IsEntered(_outer._monitor));
+          return _task == null;
+        }
+      }
 
       void Cancel() {
         Debug.Assert(!Monitor.IsEntered(_outer._monitor));
+        TaskCompletionSource<object> task;
         lock (_outer._monitor) {
-          if (Task == null) return;
-          Task = null;
+          if (_task == null) return;
+          task = _task;
+          _task = null;
           if (_outer._waiters.IsLinked(this)) {
             Debug.Assert(_outer._clients == 2);
             _outer._waiters.Remove(this);
             if (_outer._waiters.First == null) Volatile.Write(ref _outer._clients, 1);
           }
         }
-        _cancel.Cancel();
-        _cancel.Dispose();
+        task.SetCanceled();
+        // We release resources *after* telling the caller of LockAsync() that the operation is
+        // complete. While this can result in higher memory usage, it cannot lead to unbounded
+        // memory usage in cases where doing The Right Thing would result in bounded usage.
+        _reg.Dispose();
       }
     }
   }
