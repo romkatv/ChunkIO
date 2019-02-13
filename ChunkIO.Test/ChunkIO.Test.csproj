@@ -80,6 +80,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AsyncMutexTest.cs" />
+    <Compile Include="ByteReaderTest.cs" />
     <Compile Include="ByteWriterTest.cs" />
     <Compile Include="ChunkIOTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

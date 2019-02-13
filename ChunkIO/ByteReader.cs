@@ -68,7 +68,7 @@ namespace ChunkIO {
       // different file (even though that file has the same name, it's a different file nonetheless). To avoid
       // this issue, we create the first FileStream without FileShare.Delete to disallow concurrent file deletions.
       // After creating the second FileStream, we close the first and once again allow concurrent deletions.
-      using (var f = new FileStream(fname, FileMode.OpenOrCreate, FileAccess.Read, FileShare.Read | FileShare.Write)) {
+      using (var f = new FileStream(fname, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write)) {
         Id = FileId.Get(f.SafeFileHandle);
         _file = new FileStream(
           fname,
