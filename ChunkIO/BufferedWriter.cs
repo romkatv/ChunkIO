@@ -119,7 +119,7 @@ namespace ChunkIO {
 
     // CloseChunk triggers define when a chunk should be auto-closed. See comments
     // for IOutputChunk.CloseAtSize and IOutputChunk.Age for details.
-    public Triggers CloseChunk { get; set; } = new Triggers() { Size = 32 << 10 };
+    public Triggers CloseChunk { get; set; } = new Triggers() { Size = 128 << 10 };
 
     // FlushToOS and FlushToDisk triggers define when chunks that have already been
     // closed are flushed to OS and disk respectively. When FlushToDisk triggers, it
