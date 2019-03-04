@@ -127,6 +127,11 @@ namespace ChunkIO {
           }
           if (buf.IsNew) {
             buf.UserData.Long0 = Encoder.EncodePrimary(buf.Stream, e.Current).ToUniversalTime().Ticks;
+            // If the block is set up to automatically close after a certain number of bytes is
+            // written, tell it to exclude snapshot bytes from the calculation. This is necessary
+            // to avoid creating a new block on every call to Write() if snapshots happen to
+            // be large.
+            if (buf.CloseAtSize.HasValue) buf.CloseAtSize += buf.Stream.Length;
           } else {
             Encoder.EncodeSecondary(buf.Stream, e.Current);
           }
