@@ -3,7 +3,7 @@
 ChunkIO is a file format with the following properties:
 
   * Data is written and read in chunks of arbitrary size.
-  * Writes are append-only. Concurrent writes are disallowed.
+  * Writes are append-only. Concurrent writes to the same file are disallowed.
   * Efficient chunk lookup: `O(1)` to find the first or the last chunk whose start file position is in the specified range.
   * ChunkIO files can be appended to and read in the face of corruptions and truncations. Corrupted chunks are ignored by readers.
   * Chunk overhead is 40 bytes, out of which 16 bytes are user-defined data. Plus additional overhead of 16 bytes for every 64KB of chunk data, which is used to implement efficient chunk lookup and to allow readers to continue past corrupted data.
