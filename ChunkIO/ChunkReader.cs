@@ -112,7 +112,8 @@ namespace ChunkIO {
           Debug.Assert(m >= from);
           Meter? meter = await ReadMeter(m);
           if (!meter.HasValue) continue;
-          Debug.Assert(meter.Value.ChunkBeginPosition >= from);
+          // This happens if ReadLastAsync(0, from) is not skippable.
+          if (meter.Value.ChunkBeginPosition < from) continue;
           if (meter.Value.ChunkBeginPosition >= to) break;
           res = await Read(meter.Value.ChunkBeginPosition);
           if (res != null) break;
